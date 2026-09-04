@@ -13,6 +13,9 @@
   "_accounts_tool": "optional script that prints an OAuth token for a named account: <tool> token <name>. Leave empty and account switching is off - every pane uses the ambient login.",
   "accounts_tool": "",
 
+  "_panes_per_tab": "most panes `spawn --group` puts in one tab before it opens `<group>-2`. A 30-row window gives each of six panes two rows, which breaks claude's dialogs. Default: 3.",
+  "panes_per_tab": 3,
+
   "_cdp_url": "optional DevTools URL of the one shared Chrome that sessions drive (the browser lock guards it). `doctor` probes <cdp_url>/json/version when set. Default: empty, no probe.",
   "cdp_url": "",
 

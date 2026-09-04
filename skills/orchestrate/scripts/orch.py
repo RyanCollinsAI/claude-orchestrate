@@ -146,6 +146,7 @@ def cmd_account(name=None):
 # ---------------------------------------------------------------- spawn / kill
 
 TRUST_MARK = "trust this folder"
+PANES_PER_TAB = int(L.cfg("panes_per_tab", 3))
 
 
 def _accept_trust_dialog(pane, timeout=120):
@@ -184,8 +185,20 @@ def cmd_spawn(label, prompt, model="sonnet", cwd=None, workspace=None, group=Non
         env_args = account_env_args()
 
         pane = None
+        tab_label = group
         if group:
-            tab = next((t for t in L.tabs() if t.get("label", "").lower() == group.lower()), None)
+            # At most PANES_PER_TAB panes in one tab. A 30-row window split six ways left each
+            # claude with two rows (2026-09-03): its dialogs rendered as one line and the
+            # watcher misread them as DONE. Overflow goes to `<group>-2`, `<group>-3`, ...
+            tab = None
+            for n in range(1, 10):
+                tab_label = group if n == 1 else f"{group}-{n}"
+                t = next((t for t in L.tabs() if t.get("label", "").lower() == tab_label.lower()), None)
+                if t is None:
+                    break                       # create this one below
+                if t.get("pane_count", 0) < PANES_PER_TAB:
+                    tab = t
+                    break
             if tab:
                 in_tab = [p for p in L.panes() if p["tab_id"] == tab["tab_id"]]
                 anchor = in_tab[-1]["pane_id"]
@@ -193,7 +206,7 @@ def cmd_spawn(label, prompt, model="sonnet", cwd=None, workspace=None, group=Non
                 pane = L.herdr("pane", "split", "--pane", anchor, "--direction", direction,
                                "--cwd", cwd, "--no-focus", *env_args)["result"]["pane"]["pane_id"]
         if pane is None:
-            args = ["tab", "create", "--cwd", cwd, "--label", group or label, "--no-focus", *env_args]
+            args = ["tab", "create", "--cwd", cwd, "--label", tab_label or label, "--no-focus", *env_args]
             if workspace:
                 args += ["--workspace", workspace]
             pane = L.herdr(*args)["result"]["root_pane"]["pane_id"]
