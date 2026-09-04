@@ -389,7 +389,11 @@ def blocked_command(text):
 
 # ---------------------------------------------------------------- pane mode
 
-PROMPT_MARKS = ("Do you want to proceed", "Esc to cancel", "Do you want to make this edit")
+# "Would you like to proceed" / "ready to execute" is the plan-mode approval dialog. It shows no
+# "Esc to cancel" line, so four builders sat on it for eight hours on 2026-09-04 while
+# auto_accept.py and watch_sessions.py both saw nothing.
+PROMPT_MARKS = ("Do you want to proceed", "Esc to cancel", "Do you want to make this edit",
+                "Would you like to proceed", "ready to execute")
 # The updater can flip settings.json's defaultMode; a pane that came up in auto instead of bypass
 # stalls on the first classifier hit, and the teach dialog swallows keystrokes until dismissed.
 AUTO_MODE_MARK = "auto mode on"
@@ -403,7 +407,7 @@ def pending_prompt(txt):
     if not any(m in txt for m in PROMPT_MARKS) or "1. Yes" not in txt:
         return ""
     for l in txt.splitlines():
-        if "Do you want" in l and "Message from" not in l:
+        if ("Do you want" in l or "Would you like" in l) and "Message from" not in l:
             return l.strip().strip("│ ").strip()
     return "permission prompt"
 
