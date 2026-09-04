@@ -529,7 +529,7 @@ CSS = """
   :root{--bg:#f7f7f5;--card:#fff;--ink:#1a1a1a;--mute:#6b6b6b;--line:#e4e2dd;--ask:#b45309;--askbg:#fff7ed;--ok:#15803d;--okbg:#f0fdf4;--blue:#1d4ed8;--bluebg:#eff6ff;--gray:#6b7280}
   *{box-sizing:border-box;min-width:0}
   body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
-  .wrap{max-width:920px;margin:0 auto;padding:20px 18px 80px}
+  .wrap{max-width:1480px;margin:0 auto;padding:20px 28px 80px}
   header{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:18px}
   header h1{font-size:20px;margin:0}
   header .meta{color:var(--mute);font-size:13px;text-align:right}
