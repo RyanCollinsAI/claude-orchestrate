@@ -209,14 +209,20 @@ def resolve(name):
 
 # ---------------------------------------------------------------- logs
 
-def find_log(prefix):
+def find_log(prefix, soft=False):
     """Path of the one .jsonl whose name starts with `prefix`, searched across every per-cwd log
-    folder (a --cwd pane's log is not under LOGS). Exits with the candidates if ambiguous."""
+    folder (a --cwd pane's log is not under LOGS). Exits with the candidates if ambiguous, unless
+    `soft`, in which case a miss returns None and an ambiguous match returns the first hit - callers
+    that must never raise (log_path, called on every `ls`) pass soft=True."""
     # Must match `.jsonl`, not the same-named subagent directory sitting beside it.
     hits = sorted(glob.glob(os.path.join(PROJECTS_DIR, "*", prefix + "*.jsonl")))
     if not hits:
+        if soft:
+            return None
         sys.exit(f"no log starting with {prefix!r} under {PROJECTS_DIR}")
     if len(hits) > 1 and len({os.path.basename(h) for h in hits}) > 1:
+        if soft:
+            return hits[0]
         sys.exit(f"{prefix!r} matches {len(hits)} logs; give more of the id:\n  " + "\n  ".join(hits))
     return hits[0]
 
@@ -226,8 +232,14 @@ _CWD_CACHE = {}
 
 def log_path(sid):
     """The session's .jsonl. Claude Code files logs under a per-cwd folder, so a session spawned
-    with --cwd elsewhere (the CourseGrid builders) is NOT under LOGS - read its cwd from the
-    registry. Before this, `ls` showed ctx=0k and no model for every cross-cwd pane (2026-09-03)."""
+    with --cwd elsewhere (a fleet of builders working in a different repo) is NOT under LOGS - read
+    its cwd from the registry. Before this, `ls` showed ctx=0k and no model for every cross-cwd
+    pane (2026-09-03).
+
+    A registry row with no `cwd` (or one whose log isn't where that cwd predicts, e.g. an older
+    Claude Code that wrote the field differently) falls through to `find_log`'s glob search across
+    every per-cwd folder, so a session in another cwd is still found instead of reading as ctx=0k
+    with a blank model - which `resume` was then reporting as DEAD for a perfectly live pane."""
     cwd = _CWD_CACHE.get(sid)
     if cwd is None:
         for m in sessions().values():
@@ -238,7 +250,10 @@ def log_path(sid):
         p = os.path.join(PROJECTS_DIR, project_slug(cwd), sid + ".jsonl")
         if os.path.exists(p):
             return p
-    return os.path.join(LOGS, sid + ".jsonl")
+    default = os.path.join(LOGS, sid + ".jsonl")
+    if os.path.exists(default):
+        return default
+    return find_log(sid, soft=True) or default
 
 
 def log_mtime(sid):
@@ -578,12 +593,16 @@ def chrome_take(name):
 
 
 def chrome_free(name=None):
-    """Release the lock. A name that does not match the holder is refused unless it is 'force'."""
+    """Release the lock. A name that does not match the holder is refused unless it is 'force'.
+
+    `name` must actually match - a caller that passes nothing used to skip this check entirely
+    (`if name and ...` is False for name=None) and silently release whoever held it. A bare `chrome
+    free` really did drop another session's live lock this way (2026-09-04)."""
     holder, _ = chrome_holder()
     if not holder:
         return True, "already free"
-    if name and name not in (holder, "force"):
-        return False, f"{holder} holds it, not {name} (use `chrome free force`)"
+    if name not in (holder, "force"):
+        return False, f"{holder} holds it, not {name!r} (use `chrome free force`)"
     try:
         os.remove(CHROME_LOCK)
     except OSError:

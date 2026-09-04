@@ -7,6 +7,20 @@ of the earlier context and must not ask the human to repeat anything written bel
 
 <Quote what they actually asked for, their phrasing, not a summary in your words.>
 
+## Constraints and preferences
+
+<Standing rules the human stated that still bind the replacement: a tool to use or avoid, a path,
+a budget, a deadline, a look, who may be contacted. Their words where possible. One line each.
+These outlive any single step, so they go before the progress sections. "(none)" is a valid answer.>
+
+## Key decisions
+
+<Every settled call, one line each, with its reason AND the option that lost. A decision without
+its rejected alternative gets re-argued by the replacement, which is the most expensive thing a
+rotation can do. If the human made the call, say so and quote them.>
+
+- **<what was decided>**: because <why> - rejected <alternative> because <why not>
+
 ## Done
 
 <Every finished piece, with the absolute path or commit sha that proves it. One line each.>

@@ -475,14 +475,19 @@ function mdToHtml(src){
   src = src.replace(/```mermaid[ \t]*\r?\n([\s\S]*?)```/g,
         (m, b) => hold('<pre class="mermaid">' + esc(b.replace(/\s+$/, '')) + '</pre>'));
   src = src.replace(/\$\$([\s\S]*?)\$\$/g,
-        (m, b) => hold('<div class="mathblock">$$' + b + '$$</div>'));
+        (m, b) => hold('<div class="mathblock">$$' + esc(b) + '$$</div>'));
   let html = marked.parse(src, {gfm: true});
   html = html.replace(/<pre><code[^>]*>/g, '<pre class="code">')
              .replace(/<\/code><\/pre>/g, '</pre>')
              .replace(/<img /g, '<img class="fig" ');
   html = html.replace(/<p>\s*LVHOLD(\d+)ENDHOLD\s*<\/p>/g, (m, i) => holds[+i])
              .replace(/LVHOLD(\d+)ENDHOLD/g, (m, i) => holds[+i]);
-  return html;
+  // marked does not sanitize (it passes raw HTML in the source straight through, and it stopped
+  // shipping its own `sanitize` option after v1); a session's last message becomes this markdown
+  // verbatim, so a literal <script> or onerror= typed into a report has to be stripped here, not
+  // trusted to have never been there. This is also the backstop for the $$ branch above: even if a
+  // future edit re-introduces an unescaped interpolation, DOMPurify still stops it reaching the DOM.
+  return DOMPurify.sanitize(html);
 }
 
 async function typeset(root){
@@ -652,6 +657,9 @@ def write_html():
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
 <style>{CSS}</style>
 <script src="https://cdn.jsdelivr.net/npm/marked@14.1.3/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"
+        integrity="sha512-jB0TkTBeQC9ZSkBqDhdmfTv1qdfbWpGE72yJ/01Srq6hEzZIz2xkz1e57p9ai7IeHMwEG7HpzG6NdptChif5Pg=="
+        crossorigin="anonymous"></script>
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
 </head>

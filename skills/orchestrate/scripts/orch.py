@@ -88,6 +88,11 @@ def cmd_ls():
         ast = p.get("agent_status", "-")
         rows.append((name, ast, "   -", p.get("agent", "?"), pane_id, ast, kind,
                      p.get("terminal_title_stripped", "")[:38], ""))
+    print(f"{'NAME':12} {'STATUS':8} {'CTX':>6} {'MODEL':12} {'PANE':7} {'AGENT':8} {'KIND':8} TITLE")
+    if not rows:
+        print(f"no sessions found - is herdr running, and did you start a session in it? "
+              f"(looked in {L.SESS})")
+        return
     for n, st, ctx, model, pane, ast, kind, title, flag in sorted(rows, key=lambda r: r[0]):
         print(f"{n:12} {st:8} ctx={ctx} {model:12} {pane:7} {ast:8} {kind:8} {title}{flag}")
 
@@ -284,6 +289,20 @@ def cmd_spawn_codex(label, prompt, cwd=None, workspace=None, group=None, report=
     return pane, None
 
 
+def _agent_alive(pane, sid=None):
+    """True only if herdr's own pane list shows a live claude agent on `pane` right now - not the
+    id `agent start` handed back at launch, which can point at a pane that then failed to come up.
+    FRESH (2026-09-04): spawn printed `spawned ... sid=260fb3c2` and exited 0 while the pane held a
+    bare shell; this is the check that call was skipping."""
+    p = next((p for p in L.panes() if p.get("pane_id") == pane), {})
+    if p.get("agent") != "claude":
+        return False
+    live_sid = (p.get("agent_session") or {}).get("value")
+    if not live_sid:
+        return False
+    return sid is None or live_sid == sid
+
+
 def cmd_spawn(label, prompt, model="sonnet", cwd=None, workspace=None, group=None,
               kind="claude", report=""):
     if kind != "claude":
@@ -368,6 +387,13 @@ def cmd_spawn(label, prompt, model="sonnet", cwd=None, workspace=None, group=Non
             sys.exit(f"still dead after falling back to '{other}'; giving up (one retry only)")
         cmd_account(other)
         print(f"flipped account.txt to '{other}', retrying spawn once")
+
+    if not _agent_alive(pane, sid):
+        print(f"FAILED to spawn {label}: pane {pane} shows no live claude agent "
+              f"(sid={sid[:8] if sid else '-'})")
+        print(f"--- last 20 lines of pane {pane} ---")
+        print(L.pane_read(pane, 20))
+        sys.exit(1)
 
     # --allow-dangerously-skip-permissions only PERMITS bypass; --dangerously-skip-permissions
     # enters it. Verify anyway: a deny rule still prompts inside bypass.
@@ -502,6 +528,11 @@ def cmd_chrome(action=None, name=None):
         print(msg)
         sys.exit(0 if ok else 1)
     if action == "free":
+        if not name:
+            # A bare `free` used to skip chrome_free's ownership check entirely and silently drop
+            # whoever held it - a `take X && work && free` that forgot to repeat X did exactly that
+            # and freed a different session's lock out from under it (2026-09-04). Require the name.
+            sys.exit("usage: orch.py chrome free <your-label>|force")
         ok, msg = L.chrome_free(name)
         print(msg)
         sys.exit(0 if ok else 1)
@@ -536,7 +567,12 @@ def cmd_resume():
         p = by_sid.get(sid, {})
         ctx, model = L.last_usage(sid)
         row = (m["name"], p.get("pane_id", "-"), m["status"], ctx, model or "-")
-        if not model or model.startswith("<") or (ctx == 0 and p.get("pane_id")):
+        # DEAD is a claim this tool can only back up when herdr has no pane for the session at all -
+        # ctx=0k/blank model alone used to mean DEAD too, but that is what a session in another cwd
+        # looks like when its log can't be found, and a busy, healthy pane got called DEAD for it
+        # (2026-09-04, ORC-022). log_path() now falls back to a glob search, so this should be rare;
+        # treat it as live-but-unreadable instead of dead when a pane genuinely exists.
+        if not p.get("pane_id"):
             dead.append(row)
             continue
         live.append(row)
@@ -611,8 +647,10 @@ def cmd_doctor():
         f"{len(t['result']['tabs'])} tabs" if t else "herdr tab list returned nothing - restart herdr")
     if t:
         labels = [x.get("label", "") for x in t["result"]["tabs"]]
-        _ok("orchestrator tab", any(x.lower() == L.ORCHESTRATOR_TAB for x in labels),
-            f"looking for '{L.ORCHESTRATOR_TAB}'")
+        found_tab = any(x.lower() == L.ORCHESTRATOR_TAB for x in labels)
+        _ok("orchestrator tab", found_tab,
+            f"found tab '{L.ORCHESTRATOR_TAB}'" if found_tab else
+            f"not found - run: herdr tab create --label {L.ORCHESTRATOR_TAB}")
 
     print("== messaging ==")
     if L.WINDOWS:
@@ -630,11 +668,13 @@ def cmd_doctor():
         r = subprocess.run(["claude", "auth", "status"], capture_output=True, text=True,
                            encoding="utf-8", errors="replace", timeout=45)
         d = json.loads(r.stdout or "{}")
+        logged_in = bool(d.get("loggedIn"))
         # deliberately not printing the account address
-        _ok("claude auth", bool(d.get("loggedIn")),
-            f"{d.get('authMethod', '?')} / {d.get('subscriptionType', '?')}")
+        _ok("claude auth", logged_in,
+            f"found: {d.get('authMethod', '?')} / {d.get('subscriptionType', '?')}" if logged_in
+            else "not found - run: claude login")
     except Exception as e:
-        _ok("claude auth", False, f"{type(e).__name__}: {e}")
+        _ok("claude auth", False, f"not found ({type(e).__name__}: {e}) - run: claude login")
 
     ping = ["ping", "-n", "1", "-w", "3000"] if L.WINDOWS else ["ping", "-c", "1", "-W", "3"]
     try:
