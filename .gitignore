@@ -13,6 +13,7 @@ skills/orchestrate/board/board.html
 skills/orchestrate/board/board-plain.html
 skills/orchestrate/board/shown.json
 skills/orchestrate/board/chrome-lock.json
+skills/orchestrate/board/agent-panes.json
 skills/orchestrate/board/*.tmp
 skills/orchestrate/account.txt
 

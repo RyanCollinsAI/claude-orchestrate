@@ -333,7 +333,7 @@ finished session.
 ## Traps
 
 - **A cwd claude has never opened on this machine shows a "Do you trust this folder?" dialog**
-  before anything else, and `herdr agent start` reports `agent_not_ready`. Three CourseGrid panes
+  before anything else, and `herdr agent start` reports `agent_not_ready`. Three builder panes
   stalled on it 2026-09-03. `orch.py spawn` now reads the pane, picks "Yes, I trust this folder",
   waits for the agent, and prompts by pane id. For a pane started by hand: Down, Enter.
 - **Shell quoting eats backticks in `--goal`.** `` `orchestrator` `` inside a double-quoted goal ran
