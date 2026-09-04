@@ -92,6 +92,7 @@ said_stale = set()
 said_prompt = set()
 said_mode = set()        # sids already warned that the pane is in auto, not bypass
 ready_since = {}         # sid -> time it first became idle/waiting + pane idle/done
+announced = set()        # sids that got a NEW line (only sessions with a herdr pane qualify)
 last_said = {}           # sid -> text of the last stop-reason line emitted for it
 prev_agents = {}         # pane_id -> (label, kind) for non-claude panes, previous poll
 agent_ready = {}         # pane_id -> time that pane first went idle/done
@@ -114,15 +115,23 @@ while True:
         now = time.time()
 
         if not first:
+            # Only sessions with a herdr pane get NEW/GONE lines. Headless `claude -p` runs (a
+            # builder proving a hook, a routine) register for seconds and have no pane; announcing
+            # each one flooded the orchestrator with 8 NEW/GONE pairs in ten minutes on 2026-09-04.
             for sid, (st, name) in cur.items():
-                if sid not in prev:
+                if sid not in announced and sid in by_sid:
+                    announced.add(sid)
                     print(f"NEW session {name} status={st}", flush=True)
 
             for sid, (st, name) in prev.items():
                 if sid not in cur:
-                    print(f"GONE session {name} (exited)", flush=True)
+                    if sid in announced:
+                        announced.discard(sid)
+                        print(f"GONE session {name} (exited)", flush=True)
                     ready_since.pop(sid, None)
                     last_said.pop(sid, None)
+        else:
+            announced.update(sid for sid in cur if sid in by_sid)
 
             # stop-reason lines: (a) registry idle/waiting, (b) pane agent_status idle/done,
             # (c) held for READY_HOLD seconds straight, (d) text differs from what was last emitted
