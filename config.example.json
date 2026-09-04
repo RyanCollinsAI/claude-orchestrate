@@ -1,0 +1,26 @@
+{
+  "_comment": "Every key is optional. Delete the ones you do not need - the defaults below are what the skill uses when a key is missing. Any key can also be overridden for one run with an ORCH_<KEY> environment variable, e.g. ORCH_DEFAULT_CWD.",
+
+  "_default_cwd": "the directory new sessions start in, and the project whose logs the board reads. Default: the current directory.",
+  "default_cwd": "C:\\Users\\you\\your-project",
+
+  "_session_prefix": "how Claude Code names sessions here, without the -xx suffix. Default: the lowercased basename of default_cwd.",
+  "session_prefix": "your-project",
+
+  "_orchestrator_tab": "the herdr tab label the orchestrator sits in. Default: orchestrator.",
+  "orchestrator_tab": "orchestrator",
+
+  "_accounts_tool": "optional script that prints an OAuth token for a named account: <tool> token <name>. Leave empty and account switching is off - every pane uses the ambient login.",
+  "accounts_tool": "",
+
+  "_rotate_at_k": "context size in thousands of tokens at which a session is marked for rotation. Default: 400.",
+  "rotate_at_k": 400,
+
+  "_projects_dir": "where Claude Code keeps session logs. Default: ~/.claude/projects.",
+  "_sessions_dir": "the live session registry. Default: ~/.claude/sessions.",
+  "_handoffs_dir": "where handoff and task files are written. Default: ~/.claude/handoffs.",
+  "_board_dir": "where the board's state and generated page live. Default: <skill>/board.",
+
+  "_digest_repos": "repos `board.py digest` reads this morning's commits from. Default: none.",
+  "digest_repos": []
+}

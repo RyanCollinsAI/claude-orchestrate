@@ -1,0 +1,20 @@
+__pycache__/
+*.pyc
+
+# Per-machine, written by the installer. Only config.example.json is versioned.
+config.json
+skills/orchestrate/config.json
+
+# Runtime state, not configuration: the live board, the three files board.py generates from it,
+# the browser lock, the pane-position memory, and the saved account name.
+skills/orchestrate/board/state.json
+skills/orchestrate/board/state.js
+skills/orchestrate/board/board.html
+skills/orchestrate/board/board-plain.html
+skills/orchestrate/board/shown.json
+skills/orchestrate/board/chrome-lock.json
+skills/orchestrate/board/*.tmp
+skills/orchestrate/account.txt
+
+# Hook kill switch. Per-machine state; committing one silently disables the hook everywhere.
+hooks/.traps-off

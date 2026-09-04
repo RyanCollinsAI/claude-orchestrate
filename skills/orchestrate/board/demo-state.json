@@ -1,0 +1,52 @@
+{
+  "updated": "2026-01-01T09:00:00-08:00",
+  "header": {
+    "usage": "5h window 38% used - 7d window 55% used",
+    "note": "4 sessions alive, 1 waiting on you"
+  },
+  "questions": [
+    {
+      "id": "q1",
+      "title": "Retry policy for the importer: give up, or back off?",
+      "from": "importer",
+      "context_md": "The importer retries a failed row immediately, three times, then drops it. On last night's run 412 rows failed the same way: the upstream API rate-limited us and every retry landed inside the same window.\n\n```python\nfor attempt in range(3):\n    r = client.post(url, json=row)\n    if r.ok:\n        break\n    # no sleep - all three attempts land in the same rate-limit window\n```\n\n| Option | Rows recovered last night | Wall clock |\n|---|---|---|\n| A: exponential backoff, 5 tries | 412 of 412 | +9 min |\n| B: drop and report | 0 of 412 | unchanged |\n\nBoth are one commit. A changes how long a nightly run takes; B changes what lands in the table.",
+      "options": [
+        {"value": "A", "label": "Exponential backoff, 5 tries"},
+        {"value": "B", "label": "Drop the row and report it"}
+      ],
+      "pick": "A",
+      "pick_why": "the failure is transient and the extra 9 minutes is off-hours",
+      "inputs": [],
+      "created": "2026-01-01T08:41:00-08:00",
+      "answered": null,
+      "answer": null
+    }
+  ],
+  "show": [
+    {
+      "id": "s1",
+      "caption": "Nightly import, last seven runs",
+      "body_md": "| Night | Rows in | Failed | Minutes |\n|---|---|---|---|\n| Mon | 48,210 | 0 | 22 |\n| Tue | 47,988 | 0 | 21 |\n| Wed | 48,401 | 412 | 21 |\n\nWednesday is the run in Q1. Nothing else changed that night.",
+      "for": "q1",
+      "created": "2026-01-01T08:41:00-08:00"
+    }
+  ],
+  "sessions": [
+    {"pane": "importer", "doing": "retry policy, waiting on Q1", "model": "sonnet",
+     "state": "waiting", "note": "ctx 88k"},
+    {"pane": "api-tests", "doing": "flaky auth test, bisecting", "model": "opus",
+     "state": "working", "note": "ctx 214k"},
+    {"pane": "docs", "doing": "README rewrite", "model": "haiku",
+     "state": "working", "note": "ctx 31k"},
+    {"pane": "migration", "doing": "schema v4 backfill", "model": "sonnet",
+     "state": "done", "note": "ctx 402k  <-- ROTATE"}
+  ],
+  "done": [
+    {"ts": "2026-01-01T08:30:00-08:00",
+     "text": "Schema v4 backfill finished: 1.2M rows, zero orphans, verified against the v3 snapshot."},
+    {"ts": "2026-01-01T07:55:00-08:00",
+     "text": "Flaky auth test bisected to the clock skew in the test container. Fix pushed."},
+    {"ts": "2026-01-01T07:10:00-08:00",
+     "text": "Q0 answered: keep the staging database on the smaller instance until March."}
+  ]
+}
