@@ -22,7 +22,7 @@
   py orch.py chrome take <name> | free [name|force] | who
                                             the single-driver lock on the real browser
   py orch.py account [name|ambient]         which login new panes start on (optional feature)
-  py orch.py board <...>                    the Orchestrator Board - see `board.py --help`
+  py orch.py board <...>                    Podium - see `board.py --help`
 
 <name> is a session display name, a session-id prefix, or a pane id.
 Model tiers: fable = hardest (architecture, a bug that survived its own fix), opus = hard,

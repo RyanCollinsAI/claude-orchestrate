@@ -9,7 +9,7 @@ nothing is lost. The questions that genuinely need you land on a single web page
 code, table or picture attached, not a summary - and your answer goes straight back to the session
 that asked.
 
-![The Orchestrator Board](docs/board.png)
+![Podium](docs/board.png)
 
 ## Install (5 minutes)
 
@@ -49,7 +49,7 @@ And in the Claude Code session you want to be the orchestrator, say: **"be the o
 | **Python 3.11+** | required | Standard library only. No pip installs, ever. |
 | **[herdr](https://github.com/anthropics/herdr)** | required | The terminal multiplexer every command drives - `ls`, `spawn`, `rotate`, `reap`, `show`/`hide` all go through it. Without herdr the skill does nothing. |
 | **Claude Code** | required | Obviously. `doctor` also shells out to `claude auth status`. |
-| **`lavish-axi`** | optional | Only `board open` and `board_watch.py` need it. Every other command works without it; you just read the board as a local HTML file instead of getting answers back automatically. |
+| **`lavish-axi`** | optional | Only `board open` and `board_watch.py` need it. Every other command works without it; you just read Podium as a local HTML file instead of getting answers back automatically. |
 | **`pwsh`** | optional | Only if you point `accounts_tool` at a PowerShell script that switches logins. Off by default. |
 
 Windows first - that is where it was built and proven - but paths go through `os.path`, and process
@@ -63,13 +63,13 @@ orch.py spawn <label> "<prompt>"    new pane -> claude in bypass -> prompt sent
 orch.py task <label> --goal ... --done ...
                                     write a task file and spawn a session on it
 orch.py rotate <name>               ask for a handoff, verify it, spawn the replacement, close the old
-orch.py rotate-self                 rotate the orchestrator's own seat; the board carries over whole
+orch.py rotate-self                 rotate the orchestrator's own seat; Podium carries over whole
 orch.py resume                      re-arm everything after the orchestrator's process restarted
 orch.py doctor                      one red/green line per moving part
 orch.py show <name> / hide <name>   pull a pane next to you so you can type into it, then send it back
 orch.py chrome take|free|who        the single-driver lock on the shared browser
 orch.py reap [--hours 6]            close sessions that finished clean and went quiet
-orch.py board <...>                 the Orchestrator Board (see board.py --help)
+orch.py board <...>                 Podium (see board.py --help)
 ```
 
 Two `Monitor` scripts run in the background and speak only when something needs you:
@@ -86,9 +86,9 @@ Nothing here is speculative. Every command is a scar:
   end to end: a session wrote two of three files, rotated, and the replacement finished the third
   from the handoff alone.
 - **`rotate-self`** - the orchestrator cannot ask itself for a handoff; it would be waiting on its
-  own turn. So the board *is* the handoff - `state.json` is durable and gets copied in whole.
+  own turn. So Podium *is* the handoff - `state.json` is durable and gets copied in whole.
 - **`resume`** - the orchestrator's own process restarts (auto-updates, a mux restart). Four times
-  in one day. Each time the Monitors, the board read, and every mid-task builder were silently on
+  in one day. Each time the Monitors, Podium's read, and every mid-task builder were silently on
   their own. One command re-arms all of it and names what needs a nudge.
 - **`doctor`** - a usage ledger that says "100% headroom, seen never" means nothing was measured,
   not that the account is fresh. Reading *remaining* percent as *used* percent cost a day.
@@ -97,7 +97,7 @@ Nothing here is speculative. Every command is a scar:
   remember to send.
 - **The BLOCKED classifier** - when a session is stopped by the permission classifier it needs one
   exact command pasted by a human. The watcher pulls that command out of the session's own message
-  and puts it on the board, ready to copy.
+  and puts it on Podium, ready to copy.
 - **Panes, not subagents** - anything that has to outlive one turn is a pane. In-process subagents
   are children of the orchestrator's process and die with every restart.
 - **The hook** - five command shapes park a pane on a permission prompt or silently lose work
@@ -112,7 +112,7 @@ the defaults come from `~/.claude` and the current directory.
 
 | Key | Default | What it does |
 |---|---|---|
-| `default_cwd` | the current directory | Where new sessions start, and which project's logs the board reads. |
+| `default_cwd` | the current directory | Where new sessions start, and which project's logs Podium reads. |
 | `session_prefix` | basename of `default_cwd`, lowercased | How Claude Code names sessions here. |
 | `orchestrator_tab` | `orchestrator` | The herdr tab label that marks the orchestrator's own pane. |
 | `accounts_tool` | *(empty - feature off)* | A script printing an OAuth token: `<tool> token <name>`. |
@@ -127,7 +127,7 @@ The log directory is derived, not stored: Claude Code writes a project's logs to
 `~/.claude/projects/<cwd with every `:`, `\` and `/` turned into `-`>`, and `orchlib.project_slug()`
 computes exactly that from `default_cwd`.
 
-## Try the board with no real data
+## Try Podium with no real data
 
 ```
 cp  ~/.claude/skills/orchestrate/board/demo-state.json ~/.claude/skills/orchestrate/board/state.json

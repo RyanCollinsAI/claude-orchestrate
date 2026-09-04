@@ -1,4 +1,5 @@
-"""The Orchestrator Board: the one page your human reads, and the only place they are asked anything.
+"""Podium: the one page your human reads, and the only place they are asked anything. Opens in the
+Lavish editor via `lavish-axi`.
 
 State, not HTML, is the source of truth. `board/state.json` holds everything; `board render` turns
 it into `board/board.html`, and the page re-reads `state.json` every 5 s so a change shows up
@@ -418,8 +419,19 @@ def lavish_cmd(*args):
     return [exe, *args]
 
 
+def ensure_lavish_brand():
+    """Re-apply the Podium-in-the-titlebar patch before every open, so an `npm i -g lavish-axi`
+    update (which overwrites the patched file) never silently brings back "Lavish Editor". Never
+    fatal: a missing or already-patched install just prints and moves on."""
+    patcher = os.path.join(os.path.dirname(os.path.abspath(__file__)), "patch_lavish_brand.py")
+    if not os.path.exists(patcher):
+        return
+    subprocess.run([sys.executable, patcher], capture_output=True, text=True, timeout=30)
+
+
 def cmd_open(a=None):
     save(load())
+    ensure_lavish_brand()
     r = subprocess.run(lavish_cmd(HTML), capture_output=True, text=True,
                        encoding="utf-8", errors="replace", timeout=180)
     out = (r.stdout or "") + (r.stderr or "")
@@ -822,7 +834,7 @@ def write_html():
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Orchestrator Board</title>
+<title>Podium</title>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
 <style>{CSS}</style>
 <script src="https://cdn.jsdelivr.net/npm/marked@14.1.3/marked.min.js"></script>
@@ -836,12 +848,12 @@ def write_html():
 <div class="wrap">
 
 <header>
-  <h1>Orchestrator Board</h1>
+  <h1>Podium</h1>
   <div class="meta" id="meta"></div>
 </header>
 
 <noscript>
-<div class="card">JavaScript is off, so this page is empty. The whole board in plain text is at
+<div class="card">JavaScript is off, so Podium is empty. The whole thing in plain text is at
 <a href="board-plain.html">board-plain.html</a>. Turn JavaScript on for the diagrams, the
 equations, and the answer forms.</div>
 </noscript>
@@ -863,7 +875,7 @@ equations, and the answer forms.</div>
 <div id="doneSec"><h2>Done since your last look</h2>
 <div class="card"><ul class="doneList" id="done"></ul></div></div>
 
-<footer>Answers reach me through the Lavish poll. Nothing here sends anything to anyone else.</footer>
+<footer>This is Podium, opened in the Lavish editor. Answers reach me through its poll. Nothing here sends anything to anyone else.</footer>
 </div>
 
 <script src="state.js"></script>

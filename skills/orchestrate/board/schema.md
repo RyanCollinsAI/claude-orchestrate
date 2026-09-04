@@ -1,7 +1,7 @@
 # `board/state.json`
 
-The board's only source of truth.
-`board.py render` turns this into `board.html`; the page re-reads this file every 5 s and re-renders in the browser.
+Podium's only source of truth.
+`board.py render` turns this into `board.html`; Podium re-reads this file every 5 s and re-renders in the browser.
 Never hand-edit `board.html` - it is overwritten by the next `board` command.
 
 Written atomically (`.tmp` then `os.replace`) because the page polls the same file.
@@ -47,7 +47,7 @@ Options and inputs are exclusive in practice: options make radios, inputs make t
 
 Every item in `questions[]`, `show[]`, `sessions[]` and `done[]` carries a `group`: the herdr tab
 label the item's session lives in, the same string `--group` filed the pane under at spawn time
-(`web-app`, `ideas-pipeline`, `video-pipeline`, `routines`, `orchestrator`, ...). The board builds an **All**
+(`web-app`, `ideas-pipeline`, `video-pipeline`, `routines`, `orchestrator`, ...). Podium builds an **All**
 tab plus one tab per distinct `group` it finds, and filters **Show**, **Sessions** and **Done** by
 whichever tab is selected. `""` (no live pane resolved, or none given) only ever shows under **All**.
 

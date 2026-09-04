@@ -192,10 +192,11 @@ Proven end to end 2026-09-04: `task hello-codex --kind codex` -> report file in 
 `hello-codex REPORT | ...report-hello-codex.md (1059 bytes)`, `hello-codex DONE | • DONE`,
 `GONE codex hello-codex (pane closed)`.
 
-## 4b. The Board - the one page they read
+## 4b. Podium - the one page they read
 
-Four sections: **Needs you**, **Show**, **Sessions**, **Done since your last look**.
-`board/state.json` is the source of truth; `board/board.html` is generated and the page re-reads the
+Podium opens in the Lavish editor (`lavish-axi`) and has four sections: **Needs you**, **Show**,
+**Sessions**, **Done since your last look**.
+`board/state.json` is the source of truth; `board/board.html` is generated and Podium re-reads the
 state every 5 s, so a change lands without reopening.
 
 **A question carries the real thing, never a summary of it.** Their words: *"This needs to be like
@@ -211,11 +212,21 @@ images and GFM tables. A single `$` is deliberately not a math delimiter - money
     py "$BOARD" done "text"    |  render  |  open  |  prune --days 1  |  digest
 
 `orch.py board <...>` dispatches to the same CLI. Schema: `board/schema.md`.
-The board needs `lavish-axi` on PATH; everything else in this skill works without it.
+Podium needs `lavish-axi` on PATH; everything else in this skill works without it.
 
 **Only human-class questions go on the board.** Money, deletes, anything sent to other people,
 anything that changes their plans. Everything else you answer yourself (section 2) - a board full of
 small reversible picks is the failure mode, not the goal.
+
+**Podium has tabs, one per project group.** A `group` field on every question, show block, session
+row and done line sorts it onto the tab named after the herdr tab it came from - the same string
+`--group` files a pane under at spawn time (`web-app`, `ideas-pipeline`, ...). `add-question`, `show`
+and `done` also take an explicit `--group` for items with no session behind them; leave it off and
+board.py looks the pane up itself, falling back to `""` (All only) when nothing live matches. The
+**Needs you** strip is pinned above the tabs and always lists every open question regardless of
+which tab is selected, each with its group badge, so a question never hides in a tab nobody opened.
+The selected tab lives in a JS variable plus `localStorage`, so neither the 5 s poll nor a later
+page open resets it.
 
 Watch their answers the same way you watch sessions:
 
@@ -333,7 +344,7 @@ finished session.
 ## Traps
 
 - **A cwd claude has never opened on this machine shows a "Do you trust this folder?" dialog**
-  before anything else, and `herdr agent start` reports `agent_not_ready`. Three builder panes
+  before anything else, and `herdr agent start` reports `agent_not_ready`. Three CourseGrid panes
   stalled on it 2026-09-03. `orch.py spawn` now reads the pane, picks "Yes, I trust this folder",
   waits for the agent, and prompts by pane id. For a pane started by hand: Down, Enter.
 - **Shell quoting eats backticks in `--goal`.** `` `orchestrator` `` inside a double-quoted goal ran
