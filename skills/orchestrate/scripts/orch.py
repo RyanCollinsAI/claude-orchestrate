@@ -15,8 +15,10 @@
   py orch.py kill <name>                    close that session's herdr pane (falls back to the pid)
   py orch.py show <name> [--ratio 0.5]      move that pane to the RIGHT of the orchestrator pane
   py orch.py hide <name>                    send it back to the tab it came from
-  py orch.py rotate-self [--model fable] [--dry-run]
-                                            rotate the orchestrator seat; the board carries over
+  py orch.py rotate-self --notes FILE [--model fable] [--dry-run]
+  py orch.py rotate-self --no-notes [--model fable] [--dry-run]
+                                            rotate the orchestrator seat; refuses without --notes
+                                            (prints the template path) unless --no-notes is passed
   py orch.py resume                         re-arm everything after the orchestrator restarted
   py orch.py doctor                         one red/green line per moving part
   py orch.py chrome take <name> | free [name|force] | who
@@ -38,6 +40,7 @@ import orchlib as L
 SCRIPTS = os.path.dirname(os.path.abspath(__file__))
 HANDOFF_TEMPLATE = os.path.join(L.TEMPLATES, "handoff.md")
 TASK_TEMPLATE = os.path.join(L.TEMPLATES, "task.md")
+NOTES_TEMPLATE = os.path.join(L.TEMPLATES, "orch-notes.md")
 
 
 def _opt(a, flag, default=None):
@@ -779,29 +782,40 @@ def cmd_rotate(name, model="sonnet", group=None, cwd=None):
     cmd_kill(m["name"])
 
 
-SELF_HANDOFF = """# Handoff: the orchestrator seat
+SELF_HANDOFF_HEAD = """# Handoff: the orchestrator seat
 
 Written by {me} at {stamp}. You are the replacement orchestrator. You have none of the earlier
 context and must not ask your human to repeat anything below. Read the `orchestrate` skill first:
-`{skill}`.
+`{skill}`. Your very first action is `py "{orch}" kill {me}` - the old orchestrator is still
+running.
 
 ## Goal
 
 Be the one session the human talks to. Read what every other session is doing, answer their
 questions, push them along, start new ones for new ideas, and retire the ones that are finished.
 
-## Next steps
+"""
+
+SELF_HANDOFF_NO_NOTES = """## Notes
+
+`--no-notes` was passed at rotation time - nothing narrative carried over, only the trimmed board
+below. Ask your human to fill you in on anything not already on the board.
+
+"""
+
+SELF_HANDOFF_NEXT_STEPS = """## Next steps
 
 1. `py "{orch}" kill {me}`      <-- do this first; the old orchestrator is still running
 2. `py "{orch}" resume`         re-arms the Monitors and lists what needs a nudge
 3. `py "{orch}" doctor`         one red/green line per moving part
 4. Open the board: `py "{board}" open` and give your human the URL.
 
-## The board is the durable part
+"""
 
-Nothing below was reconstructed from memory - it is a verbatim copy of
-`{state}`, which survives this rotation. Every open question, every
-Show block, the session table and the Done list are all still there, and `board render` rebuilds
+BOARD_TRIMMED = """## The board, trimmed
+
+`{state}` is on disk and survives this rotation - open it directly for anything not listed below,
+including the full text of Show blocks and Done lines older than 24 hours. `board render` rebuilds
 the page from it. Answer small reversible questions yourself; only human-class ones stay on the
 board (money, deletes, anything sent to other people, anything that changes their plans).
 
@@ -809,21 +823,20 @@ board (money, deletes, anything sent to other people, anything that changes thei
 
 {open_qs}
 
+### Show captions
+
+{show_caps}
+
 ### Sessions the board last recorded
 
 {sess}
 
-## state.json, verbatim
+### Done in the last 24 hours
 
-```json
-{state_json}
-```
+{done_recent}
+"""
 
-## Open questions
-
-None beyond the board above.
-
-## Files that matter
+SELF_HANDOFF_FOOTER = """## Orchestrator files
 
 - `{board}` - every board command; `board render` after any hand-edit of state.json
 - `{watcher}` - the Monitor that turns answers on the board into `board answer`
@@ -832,10 +845,12 @@ None beyond the board above.
 """
 
 
-def cmd_rotate_self(model="fable", group=None, cwd=None, dry=False):
+def cmd_rotate_self(model="fable", group=None, cwd=None, dry=False, notes=None, no_notes=False):
     """Rotate the orchestrator seat. `rotate` cannot do this - it waits on a handoff written by the
-    session it is running inside, which can never finish its own turn. Here the board IS the
-    handoff: state.json is durable and gets copied in whole, so the replacement loses nothing."""
+    session it is running inside, which can never finish its own turn. The orchestrator's own
+    knowledge (why a builder is held, whose edits are uncommitted, which login is ambient) never
+    lived in state.json, so it has to be written by hand into a notes file first; rotate-self
+    refuses to run without one unless --no-notes says to skip it."""
     sys.path.insert(0, SCRIPTS)
     import board as B
 
@@ -851,21 +866,49 @@ def cmd_rotate_self(model="fable", group=None, cwd=None, dry=False):
     if caller and seat and caller != seat and not os.environ.get("ORCH_ALLOW_FOREIGN_ROTATE"):
         sys.exit(f"refusing: rotate-self was called from session {caller[:8]} but the orchestrator "
                  f"seat is {seat[:8]}. Run it from the orchestrator, or set ORCH_ALLOW_FOREIGN_ROTATE=1.")
+
+    if not notes and not no_notes:
+        sys.exit(f"refusing: rotate-self needs a narrative notes file, not just the board. Write "
+                 f"one from the template at\n  {NOTES_TEMPLATE}\nthen run "
+                 f"rotate-self --notes <that file>. Pass --no-notes to rotate on the board alone.")
+    notes_body = ""
+    if notes:
+        if not os.path.exists(notes):
+            sys.exit(f"--notes file not found: {notes}")
+        notes_body = open(notes, encoding="utf-8").read().strip()
+
     me = L.orchestrator_name()
     s = B.load()
     open_qs = [q for q in s["questions"] if not q.get("answered")]
+    show_items = s.get("show", [])
+    done_items = s.get("done", [])
+    cutoff = datetime.datetime.now().astimezone() - datetime.timedelta(hours=24)
+    done_recent = [d for d in done_items if datetime.datetime.fromisoformat(d["ts"]) >= cutoff]
+
     orch = os.path.abspath(__file__)
-    body = SELF_HANDOFF.format(
-        me=me, stamp=datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
-        skill=os.path.join(L.SKILL, "SKILL.md"), orch=orch,
-        board=os.path.join(SCRIPTS, "board.py"),
-        watcher=os.path.join(SCRIPTS, "board_watch.py"), state=B.STATE,
+    board_py = os.path.join(SCRIPTS, "board.py")
+    watcher = os.path.join(SCRIPTS, "board_watch.py")
+    fmt_common = dict(me=me, orch=orch, board=board_py, watcher=watcher, state=B.STATE)
+
+    head = SELF_HANDOFF_HEAD.format(
+        stamp=datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
+        skill=os.path.join(L.SKILL, "SKILL.md"), **fmt_common)
+    next_steps = SELF_HANDOFF_NEXT_STEPS.format(**fmt_common)
+    board_section = BOARD_TRIMMED.format(
         open_qs="\n".join(f"- **{q['id'].upper()}** {q.get('title', '')}"
                           f"{(' (from ' + q['from'] + ')') if q.get('from') else ''}"
                           for q in open_qs) or "- none; the board is clear",
+        show_caps="\n".join(f"- {it.get('caption', '')}" for it in show_items) or "- none",
         sess="\n".join(f"- `{r.get('pane')}` {r.get('state')} - {r.get('doing')}"
                        for r in s["sessions"]) or "- none recorded",
-        state_json=json.dumps(s, indent=2, ensure_ascii=False))
+        done_recent="\n".join(f"- {d.get('ts', '')} - {d.get('text', '')}"
+                              for d in done_recent) or "- none in the last 24h",
+        **fmt_common)
+    footer = SELF_HANDOFF_FOOTER.format(**fmt_common)
+
+    body = head
+    body += notes_body + "\n\n" if notes_body else SELF_HANDOFF_NO_NOTES
+    body += next_steps + board_section + "\n" + footer
 
     path = path_for(me)
     if dry:
@@ -876,7 +919,8 @@ def cmd_rotate_self(model="fable", group=None, cwd=None, dry=False):
         return path
     open(path, "w", encoding="utf-8").write(body)
     print(f"handoff written: {path} ({os.path.getsize(path)} bytes), "
-          f"{len(open_qs)} open question(s) carried over")
+          f"{len(open_qs)} open question(s) carried over"
+          f"{', notes from ' + notes if notes else ' (--no-notes)'}")
     # Relabel this seat first so orchestrator_sid() never picks the retiring pane while both
     # share the tab (four task files pointed builders at the dying seat on 2026-09-03).
     mine = _orch_pane()
@@ -1002,7 +1046,8 @@ def main():
         cmd_account(a[1] if len(a) > 1 else None)
     elif cmd == "rotate-self":
         cmd_rotate_self(_opt(a, "--model", "fable"), _opt(a, "--group"),
-                        _opt(a, "--cwd"), "--dry-run" in a)
+                        _opt(a, "--cwd"), "--dry-run" in a,
+                        _opt(a, "--notes"), "--no-notes" in a)
     elif cmd == "board":
         import board
         board.main(a[1:])

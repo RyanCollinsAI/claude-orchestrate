@@ -12,7 +12,7 @@ that one test is skipped, not failed, if node is missing.
   doctor   the orchestrator-tab and claude-auth lines say found/not found with a remedy
   chrome   a bare `chrome free` (no name) can never drop someone else's lock
 """
-import contextlib, io, json, os, re, shutil, subprocess, sys, tempfile, unittest
+import contextlib, datetime, io, json, os, re, shutil, subprocess, sys, tempfile, unittest
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -284,6 +284,81 @@ console.log(JSON.stringify(results));
         self.assertNotIn("<img", results["math"],
                           "the $$...$$ body reached the page as a raw tag, not escaped text (ORC-042)")
         self.assertIn("&lt;img", results["math"])
+
+
+class TestRotateSelfNotes(unittest.TestCase):
+    """rotate-self must refuse without --notes or --no-notes (prints the template path), splice a
+    given notes file above the trimmed board, and only carry Done lines from the last 24h."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        import board
+        self.board = board
+        now = datetime.datetime.now().astimezone()
+        old_ts = (now - datetime.timedelta(hours=25)).isoformat()
+        recent_ts = (now - datetime.timedelta(hours=1)).isoformat()
+        self.fake_state = {
+            "questions": [{"id": "q1", "title": "a real question", "answered": None, "from": ""}],
+            "show": [{"caption": "a show caption"}],
+            "sessions": [{"pane": "p1", "state": "working", "doing": "doing stuff"}],
+            "done": [
+                {"ts": old_ts, "text": "OLD done line, over 24h ago"},
+                {"ts": recent_ts, "text": "RECENT done line, within 24h"},
+            ],
+        }
+        patches = [
+            mock.patch.object(self.board, "load", return_value=self.fake_state),
+            mock.patch.object(self.board, "STATE", os.path.join(self.tmp.name, "state.json")),
+            mock.patch.object(L, "orchestrator_sid", return_value=None),
+            mock.patch.object(L, "orchestrator_name", return_value="test-orch"),
+            mock.patch.object(L, "HANDOFFS", self.tmp.name),
+            mock.patch.dict(os.environ, {"CLAUDE_CODE_SESSION_ID": ""}),
+        ]
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+
+    def _run(self, **kwargs):
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf):
+            orch.cmd_rotate_self(dry=True, **kwargs)
+        return buf.getvalue()
+
+    def test_refuses_without_notes_or_no_notes(self):
+        with self.assertRaises(SystemExit) as cm:
+            self._run()
+        self.assertIn(orch.NOTES_TEMPLATE, str(cm.exception))
+
+    def test_no_notes_flag_is_accepted_and_says_so(self):
+        out = self._run(no_notes=True)
+        self.assertIn("--no-notes", out)
+        self.assertIn("The board, trimmed", out)
+
+    def test_missing_notes_file_errors(self):
+        with self.assertRaises(SystemExit) as cm:
+            self._run(notes=os.path.join(self.tmp.name, "does-not-exist.md"))
+        self.assertIn("not found", str(cm.exception))
+
+    def test_notes_are_spliced_above_the_trimmed_board(self):
+        notes_path = os.path.join(self.tmp.name, "notes.md")
+        marker = "UNIQUE-NOTES-MARKER: what the human said today"
+        open(notes_path, "w", encoding="utf-8").write(f"## The human's asks today\n\n{marker}\n")
+        out = self._run(notes=notes_path)
+        self.assertIn(marker, out)
+        self.assertLess(out.index(marker), out.index("## The board, trimmed"),
+                         "notes must be spliced above the board section, not after it")
+
+    def test_done_lines_are_cut_to_the_last_24_hours(self):
+        out = self._run(no_notes=True)
+        self.assertIn("RECENT done line, within 24h", out)
+        self.assertNotIn("OLD done line, over 24h ago", out)
+
+    def test_no_verbatim_state_json_dump(self):
+        out = self._run(no_notes=True)
+        self.assertNotIn('"questions"', out, "the raw state.json dump should be gone")
+        self.assertIn("a real question", out)          # open questions still carried in full
+        self.assertIn("a show caption", out)            # Show captions still carried
 
 
 if __name__ == "__main__":

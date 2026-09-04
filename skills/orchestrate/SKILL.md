@@ -288,16 +288,34 @@ replacement finished the third from the handoff alone with no other context.
 
 ## 6. Rotate yourself
 
-    py "$ORCH" rotate-self [--dry-run]
+    py "$ORCH" rotate-self --notes <file> [--dry-run]
+    py "$ORCH" rotate-self --no-notes [--dry-run]
 
-One command. It writes the handoff from `templates/handoff.md`'s shape **plus the whole of
-`board/state.json`**, spawns the replacement with `--model fable` in the orchestrator tab, and stops.
-The replacement's first Next step is `py "$ORCH" kill <my-name>`, so it retires you; its second and
-third are `resume` and `doctor`.
+The board alone is not the handoff. `board/state.json` never held *your* knowledge - why a builder
+is held, what the human actually asked today, who holds the browser lock, whose edits are
+uncommitted, which login is ambient - so `rotate-self` refuses to run without `--notes <file>` and
+prints the template path to fill: `templates/orch-notes.md` (`templates/handoff.md`'s shape plus
+three sections: **Sessions and what each waits on** - a table of name/pane/next step/why
+waiting/files it owns; **The human's asks today, not yet done** - their words; **Environment** -
+ambient login and usage trap, browser lock holder, uncommitted edits by owner). Pass `--no-notes`
+to rotate on the board alone when there is truly nothing to say.
 
-Nothing has to be summarised out of context first: the board is durable, so every open question,
-Show block, session row and Done line crosses the rotation verbatim. `--dry-run` prints the path
-and the whole file without spawning or killing anything.
+The exact sequence:
+
+    py "$BOARD" ...                                            # fill in what's known if needed
+    # write a narrative file from templates/orch-notes.md by hand, e.g.
+    #   ~/.claude/handoffs/orch-notes-<stamp>.md
+    py "$ORCH" rotate-self --notes ~/.claude/handoffs/orch-notes-<stamp>.md
+
+`rotate-self` splices that file above a **trimmed** board section - open questions in full, Show
+captions, session rows, and only Done lines from the last 24 hours, not the whole of `state.json`;
+the replacement is told the full file is still on disk for anything older. It then spawns the
+replacement with `--model fable` in the orchestrator tab and stops. The replacement's first Next
+step is `py "$ORCH" kill <my-name>`, so it retires you; its second and third are `resume` and
+`doctor`.
+
+`--dry-run` prints the path and the whole assembled file without writing it, spawning, or killing
+anything.
 
 `rotate` cannot do this to itself - it would be waiting on its own turn to finish.
 
@@ -408,4 +426,5 @@ finished session.
     board/schema.md            what every field in state.json means
     board/demo-state.json      a fake board; `board render` it to see the look with no real data
     templates/handoff.md       what a rotating session must write
+    templates/orch-notes.md    what `rotate-self --notes` needs before it will run
     templates/task.md          what `orch.py task` fills in
