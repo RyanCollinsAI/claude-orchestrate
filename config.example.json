@@ -13,6 +13,9 @@
   "_accounts_tool": "optional script that prints an OAuth token for a named account: <tool> token <name>. Leave empty and account switching is off - every pane uses the ambient login.",
   "accounts_tool": "",
 
+  "_cdp_url": "optional DevTools URL of the one shared Chrome that sessions drive (the browser lock guards it). `doctor` probes <cdp_url>/json/version when set. Default: empty, no probe.",
+  "cdp_url": "",
+
   "_rotate_at_k": "context size in thousands of tokens at which a session is marked for rotation. Default: 400.",
   "rotate_at_k": 400,
 

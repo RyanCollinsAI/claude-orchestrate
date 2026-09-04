@@ -521,6 +521,18 @@ def cmd_doctor():
     print("== browser lock ==")
     holder, since = L.chrome_holder()
     print(f"  --   chrome                     {holder + ' since ' + str(since) if holder else 'free'}")
+    cdp = L.cfg("cdp_url", "")
+    if cdp:
+        # An in-place Chrome self-update kills every renderer in the running window (2026-09-03,
+        # 151 -> 153); the port then answers nothing until that profile is relaunched.
+        try:
+            import urllib.request
+            with urllib.request.urlopen(cdp.rstrip("/") + "/json/version", timeout=5) as r:
+                ver = json.loads(r.read().decode("utf-8", "replace")).get("Browser", "?")
+            _ok("chrome cdp", True, f"{cdp} {ver}")
+        except Exception as e:
+            _ok("chrome cdp", False,
+                f"{cdp} not answering ({type(e).__name__}) - relaunch that profile on the same port")
 
 
 # ---------------------------------------------------------------- rotate
