@@ -290,6 +290,16 @@ finished session.
 
 ## Traps
 
+- **A cwd claude has never opened on this machine shows a "Do you trust this folder?" dialog**
+  before anything else, and `herdr agent start` reports `agent_not_ready`. Three CourseGrid panes
+  stalled on it 2026-09-03. `orch.py spawn` now reads the pane, picks "Yes, I trust this folder",
+  waits for the agent, and prompts by pane id. For a pane started by hand: Down, Enter.
+- **Shell quoting eats backticks in `--goal`.** `` `orchestrator` `` inside a double-quoted goal ran
+  as a command and vanished from four task files. Write session names bare, or use the task file.
+- **During a rotation two panes share the `orchestrator` tab and label.** `orchestrator_sid()` now
+  prefers the pane whose session title matches the tab and skips any pane labelled `orch-*`, and
+  `rotate-self` relabels the retiring seat `orch-retiring` before spawning. Before that, four task
+  files told builders to report to the seat that was about to be killed.
 - **`--allow-dangerously-skip-permissions` only PERMITS bypass; `--dangerously-skip-permissions`
   enters it.** A pane started with the wrong one comes up in default mode and stalls silently on the
   first "Do you want to proceed?". `orch.py spawn` passes the right flag and confirms bypass within

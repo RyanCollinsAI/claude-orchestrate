@@ -8,11 +8,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import orchlib as L
 
 sid, since = sys.argv[1], sys.argv[2]
-hits = [p for p in os.listdir(L.LOGS) if p.startswith(sid) and p.endswith(".jsonl")]
-if not hits:
-    sys.exit(f"no log starting with {sid!r} in {L.LOGS}")
-
-with open(os.path.join(L.LOGS, hits[0]), "rb") as fh:
+with open(L.find_log(sid), "rb") as fh:
     fh.seek(0, 2)
     fh.seek(max(0, fh.tell() - 20000))
     data = fh.read().decode("utf-8", "replace")

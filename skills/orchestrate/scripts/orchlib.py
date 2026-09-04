@@ -139,12 +139,22 @@ def tab_label(tab_id):
 def orchestrator_sid():
     """Session id of the pane sitting in the tab labelled with `orchestrator_tab`."""
     ids = {t["tab_id"] for t in tabs() if t.get("label", "").lower() == ORCHESTRATOR_TAB}
+    found = []
     for p in panes():
-        if p.get("tab_id") in ids and (p.get("label") or "").lower() != "orch-builder":
+        label = (p.get("label") or "").lower()
+        if p.get("tab_id") in ids and not label.startswith("orch-"):
             s = p.get("agent_session") or {}
             if s.get("value"):
-                return s["value"]
-    return None
+                title = (p.get("terminal_title_stripped") or "").lower()
+                found.append((label == ORCHESTRATOR_TAB, title == ORCHESTRATOR_TAB, s["value"]))
+    if not found:
+        return None
+    # During a rotation two sessions share the tab and often the label; the live orchestrator is
+    # the one whose session title is the tab label too (rotate-self names it so), and rotate-self
+    # relabels the retiring pane `orch-retiring`, which is skipped above. Taking the first pane
+    # named the retiring seat in four task files (2026-09-03).
+    found.sort(key=lambda t: (not t[0], not t[1]))
+    return found[0][2]
 
 
 def orchestrator_name():
@@ -199,7 +209,35 @@ def resolve(name):
 
 # ---------------------------------------------------------------- logs
 
+def find_log(prefix):
+    """Path of the one .jsonl whose name starts with `prefix`, searched across every per-cwd log
+    folder (a --cwd pane's log is not under LOGS). Exits with the candidates if ambiguous."""
+    # Must match `.jsonl`, not the same-named subagent directory sitting beside it.
+    hits = sorted(glob.glob(os.path.join(PROJECTS_DIR, "*", prefix + "*.jsonl")))
+    if not hits:
+        sys.exit(f"no log starting with {prefix!r} under {PROJECTS_DIR}")
+    if len(hits) > 1 and len({os.path.basename(h) for h in hits}) > 1:
+        sys.exit(f"{prefix!r} matches {len(hits)} logs; give more of the id:\n  " + "\n  ".join(hits))
+    return hits[0]
+
+
+_CWD_CACHE = {}
+
+
 def log_path(sid):
+    """The session's .jsonl. Claude Code files logs under a per-cwd folder, so a session spawned
+    with --cwd elsewhere (the CourseGrid builders) is NOT under LOGS - read its cwd from the
+    registry. Before this, `ls` showed ctx=0k and no model for every cross-cwd pane (2026-09-03)."""
+    cwd = _CWD_CACHE.get(sid)
+    if cwd is None:
+        for m in sessions().values():
+            if m.get("cwd"):
+                _CWD_CACHE[m["sessionId"]] = m["cwd"]
+        cwd = _CWD_CACHE.get(sid)
+    if cwd:
+        p = os.path.join(PROJECTS_DIR, project_slug(cwd), sid + ".jsonl")
+        if os.path.exists(p):
+            return p
     return os.path.join(LOGS, sid + ".jsonl")
 
 

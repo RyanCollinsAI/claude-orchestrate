@@ -145,6 +145,26 @@ def cmd_account(name=None):
 
 # ---------------------------------------------------------------- spawn / kill
 
+TRUST_MARK = "trust this folder"
+
+
+def _accept_trust_dialog(pane, timeout=120):
+    """If the pane shows claude's first-open trust dialog, choose 'Yes, I trust this folder'
+    (the second row), then wait for herdr to see the agent idle. Returns the session id or None."""
+    txt = L.pane_read(pane, 40).lower()
+    if TRUST_MARK in txt:
+        L.send_keys(pane, "Down")
+        L.send_keys(pane, "Enter")
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        time.sleep(2)
+        p = next((p for p in L.panes() if p.get("pane_id") == pane), {})
+        s = (p.get("agent_session") or {}).get("value")
+        if s and p.get("agent_status") in ("idle", "done"):
+            return s
+    return None
+
+
 def cmd_spawn(label, prompt, model="sonnet", cwd=None, workspace=None, group=None):
     cwd = cwd or L.DEFAULT_CWD
     if prompt.startswith("@"):
@@ -213,10 +233,19 @@ def cmd_spawn(label, prompt, model="sonnet", cwd=None, workspace=None, group=Non
             started = L.herdr("agent", "start", label, "--kind", "claude", "--pane", pane,
                               "--timeout", "90000", "--",
                               "--dangerously-skip-permissions", "--model", model_id,
-                              "--name", label, timeout=120)
-            sid = started["result"]["agent"]["agent_session"]["value"]
+                              "--name", label, timeout=120, soft=True)
+            sid = (((started or {}).get("result") or {}).get("agent") or {}) \
+                .get("agent_session", {}).get("value")
             agent_target = label
+            if not sid:
+                # A cwd claude has never opened on this machine shows "Is this a project you
+                # trust?" and herdr answers agent_not_ready. Three panes stalled on it 2026-09-03.
+                # Pick "Yes, I trust this folder" and wait for the agent the way the env path does.
+                sid = _accept_trust_dialog(pane)
+                agent_target = pane
             dead = next((m for m in DEAD_ACCOUNT_MARKS if m in L.pane_read(pane, 40).lower()), None)
+            if not dead and not sid:
+                sys.exit(f"claude did not come up in pane {pane}: {started}")
 
         if not dead:
             break
@@ -669,6 +698,10 @@ def cmd_rotate_self(model="fable", group=None, cwd=None, dry=False):
     open(path, "w", encoding="utf-8").write(body)
     print(f"handoff written: {path} ({os.path.getsize(path)} bytes), "
           f"{len(open_qs)} open question(s) carried over")
+    # Relabel this seat first so orchestrator_sid() never picks the retiring pane while both
+    # share the tab (four task files pointed builders at the dying seat on 2026-09-03).
+    mine = _orch_pane()
+    L.herdr("pane", "rename", mine["pane_id"], "orch-retiring", soft=True)
     cmd_spawn(L.ORCHESTRATOR_TAB, "@" + path, model=model, cwd=cwd, group=group)
     print(f"replacement spawned. It kills {me} as its first step - stop here.")
     return path

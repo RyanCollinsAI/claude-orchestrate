@@ -26,13 +26,8 @@ def text_of(msg):
     return "\n".join(out)
 
 
-# Must match `.jsonl`, not the same-named subagent directory sitting beside it.
-hits = [p for p in os.listdir(L.LOGS) if p.startswith(sid) and p.endswith(".jsonl")]
-if not hits:
-    sys.exit(f"no log starting with {sid!r} in {L.LOGS}")
-
 msgs = []
-with open(os.path.join(L.LOGS, hits[0]), encoding="utf-8", errors="replace") as fh:
+with open(L.find_log(sid), encoding="utf-8", errors="replace") as fh:
     for line in fh:
         try:
             e = json.loads(line)
