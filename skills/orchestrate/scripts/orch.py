@@ -486,17 +486,19 @@ def cmd_doctor():
         _ok("api.anthropic.com", False, str(e))
 
     print("== settings ==")
-    local = os.path.join(L.CLAUDE_HOME, "settings.local.json")
-    for path in (L.SETTINGS, local):
+    # The updater rewrites both the user file and the PROJECT local file (the one under the
+    # working directory's .claude/), so check that one, not ~/.claude/settings.local.json.
+    local = os.path.join(L.DEFAULT_CWD, ".claude", "settings.local.json")
+    for path, label in ((L.SETTINGS, "settings.json"), (local, "project settings.local")):
         if not os.path.exists(path):
-            print(f"  --   {os.path.basename(path):26} not present")
+            print(f"  --   {label:26} not present")
             continue
         mode = _json_get(path, "permissions", "defaultMode")
         if mode is None:
             # Absent is fine: the file simply does not override the mode.
-            print(f"  --   {os.path.basename(path):26} defaultMode not set (inherits)")
+            print(f"  --   {label:26} defaultMode not set (inherits)")
             continue
-        _ok(os.path.basename(path), mode == "bypassPermissions",
+        _ok(label, mode == "bypassPermissions",
             f"defaultMode={mode}"
             + ("   <-- the updater flips this to auto; panes then stall on the classifier"
                if mode != "bypassPermissions" else ""))
