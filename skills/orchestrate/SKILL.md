@@ -81,6 +81,9 @@ Lines it emits:
 
     NEW session <name> status=<s>
     GONE session <name> (exited)
+    NEW codex <name> pane=<id>    a non-claude agent pane appeared (4a)
+    GONE codex <name> (pane closed)
+    <name> REPORT | <path>    a codex task wrote its report file - read it
     <name> QUESTION | ...     it is waiting on a human - read it and answer
     <name> BLOCKED | ...      the permission classifier stopped it; it needs a command pasted
     <name> OFFER | ...        it offered to do more - say yes or close it
@@ -149,9 +152,45 @@ that finishes inside a couple of minutes and hands back one answer - a docs look
 grep across repos. A tutor, a long build, a watcher, anything you will come back to or your human
 might want to watch - `orch.py spawn` it. In-process subagents are children of this session's
 process and every one of them died with each of 2026-09-03's four restarts; a pane survives, and
-`resume` finds it again. Confirmed 2026-09-04 when the human was asked whether
+`resume` finds it again. Confirmed by the human 2026-09-04 ("keep 1 i like it") when asked whether
 quick lookups should be panes too: no, panes for anything over a couple of minutes, subagents for
 quick lookups. Say which you used when it matters.
+
+## 4a. Codex and other kinds
+
+A pane can run codex-cli instead of claude. Same tab, same board, same watcher:
+
+    py "$ORCH" task <label> --kind codex --goal "..." --done "..." [--report PATH] [--group "<tab>"]
+    py "$ORCH" spawn <label> "<prompt>" --kind codex [--report PATH] [--group "<tab>"]
+    py "$ORCH" kill <label>          # same command; it finds the pane by label or pane id
+
+`spawn --kind codex` opens the pane, runs `codex --dangerously-bypass-approvals-and-sandbox`
+(codex's own bypass - the TUI header then reads `permissions: YOLO mode`), clears codex's two
+first-open dialogs, then prompts through `herdr agent prompt <pane>`.
+
+**The report file is the whole contract.** Codex has no `SendMessage`, so `task --kind codex`
+writes into the task file: *write your final report to `<path>`, then print `DONE` on its own line
+as the last line of your reply*. Default path `~/.claude/handoffs/report-<label>.md`; override with
+`--report`. `watch_sessions.py` prints `<label> REPORT | <path> (<n> bytes)` the moment it lands -
+that is the line to wait for, then read the file.
+
+What does not carry over:
+
+- **No `SendMessage`, in either direction.** You cannot message it and it cannot message you. To
+  say something mid-task, use `herdr agent prompt <pane-id> "<text>"`.
+- **No ctx and no rotate.** There is no session id, no registry entry and no `.jsonl`, so `ls`
+  prints `ctx=   -` and `rotate` cannot run. A Codex pane that fills up gets killed and re-tasked.
+- **No `reap`.** Reaping reads log timestamps; it skips these panes entirely.
+- **No model tier.** `--model` is ignored; codex picks its own.
+
+`ls`, the watcher's `NEW`/`GONE`/`DONE`/`QUESTION`/`ERROR` lines, and the board all work, built
+from herdr plus the last 40 lines of the pane's screen, run through the same word rules that judge
+a Claude session's last words (`orchlib.classify_words`). `board/agent-panes.json` remembers each
+pane's label and report path - herdr already reports the kind, so nothing else is stored.
+
+Proven end to end 2026-09-04: `task hello-codex --kind codex` -> report file in 35 s, then
+`hello-codex REPORT | ...report-hello-codex.md (1059 bytes)`, `hello-codex DONE | • DONE`,
+`GONE codex hello-codex (pane closed)`.
 
 ## 4b. The Board - the one page they read
 
@@ -318,6 +357,14 @@ finished session.
   in bypass. Use absolute paths; the cwd persists anyway.
 - **Use the pane id as the herdr target**, not a name. `herdr agent prompt|read <target>` takes both,
   but a pane started by hand has no agent name - only the pane id always resolves.
+- **`herdr agent start --kind codex` fails on Windows.** herdr launches
+  `Start-Process -FilePath codex`, and `codex` on PATH is an npm `.cmd`/`.ps1` shim, so it dies with
+  "%1 is not a valid Win32 application". `orch.py` tries `agent start` first and falls back to
+  typing the command into the pane shell; herdr still detects `agent: codex` on the pane either way.
+- **Codex opens with two dialogs and the first prompt is swallowed by them.** "Do you trust the
+  contents of this directory?" takes Enter; the hooks-review table takes Escape (which closes it
+  without trusting anything). `herdr agent prompt` returns `agent_prompted` anyway and the text
+  disappears, so `orch.py` clears both before it prompts.
 - **A freshly spawned session's `~/.claude/sessions/<pid>.json` is briefly written without
   name/status/sessionId.** `orchlib.sessions()` skips those instead of raising; never index that dict
   with `[]` in new code.
@@ -346,6 +393,7 @@ finished session.
     scripts/tail_session.py    read a session's first and last words
     scripts/recent_events.py   everything a session did after a timestamp
     board/state.json           the board itself - the source of truth
+    board/agent-panes.json     label and report path for each non-claude (codex) pane
     board/schema.md            what every field in state.json means
     board/demo-state.json      a fake board; `board render` it to see the look with no real data
     templates/handoff.md       what a rotating session must write

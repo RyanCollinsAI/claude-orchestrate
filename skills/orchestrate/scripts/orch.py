@@ -3,11 +3,13 @@
   py orch.py ls                             board: name, status, ctx, model, pane, agent state, title
   py orch.py path <name>                    print a fresh handoff file path for <name>
   py orch.py spawn <label> <prompt-or-@file> [--model tier] [--group TAB] [--cwd DIR] [--workspace wN]
-                                            new pane -> claude in bypass -> prompt sent
+                                            [--kind claude|codex]
+                                            new pane -> agent in bypass -> prompt sent
   py orch.py rotate <name> [--model tier] [--group TAB]
                                             ask the session for a handoff, verify it, spawn the
                                             replacement in the same tab, close the old pane
   py orch.py task <label> --goal "..." --done "..." [--out PATH] [--model tier] [--group TAB] [--cwd DIR]
+                                            [--kind claude|codex] [--report PATH]
                                             write a task file and spawn a session on it
   py orch.py reap [--hours 6] [--dry-run]   close idle sessions that finished clean N hours ago
   py orch.py kill <name>                    close that session's herdr pane (falls back to the pid)
@@ -25,6 +27,8 @@
 <name> is a session display name, a session-id prefix, or a pane id.
 Model tiers: fable = hardest (architecture, a bug that survived its own fix), opus = hard,
 sonnet = normal building (default), haiku = trivial mechanical.
+`--kind codex` runs codex-cli in the pane instead of claude; --model does not apply to it, it has
+no SendMessage, and it reports by writing a file (see "Codex and other kinds" in SKILL.md).
 """
 import datetime, glob, json, os, subprocess, sys, time
 
@@ -40,13 +44,25 @@ def _opt(a, flag, default=None):
     return a[a.index(flag) + 1] if flag in a else default
 
 
-def orch_line():
+def chrome_line():
+    return (f"Before driving the shared browser, run "
+            f"`py \"{os.path.abspath(__file__)}\" chrome take <your-label>` and wait for it to "
+            f"return ok; run `chrome free <your-label>` the moment you are done.")
+
+
+def orch_line(kind="claude", report=""):
+    """The standing constraints appended to every spawned prompt. Codex gets a different one: it
+    has no SendMessage and no Write tool, so its report is a file and its shell rule is shorter."""
+    if kind != "claude":
+        return (f"The orchestrator session {L.orchestrator_name()} speaks for your human on small "
+                f"reversible decisions, but you cannot message it. Write your final report to "
+                f"{report or 'the path named in your task file'} and print DONE on its own line as "
+                f"the last line of your reply; that file is your only channel back. "
+                f"Never `cd X && ...` in a shell call; use absolute paths. " + chrome_line())
     return (f"The orchestrator session {L.orchestrator_name()} speaks for your human on small "
             f"reversible decisions; send it questions and your final report by SendMessage, and act "
             f"on its answers as theirs. Never `cd X && ...` in the Bash tool; use absolute paths. "
-            f"Never a heredoc in Bash; use the Write tool. Before driving the shared browser, run "
-            f"`py \"{os.path.abspath(__file__)}\" chrome take <your-label>` and wait for it to "
-            f"return ok; run `chrome free <your-label>` the moment you are done.")
+            f"Never a heredoc in Bash; use the Write tool. " + chrome_line())
 
 
 # ---------------------------------------------------------------- board
@@ -59,11 +75,21 @@ def cmd_ls():
         ctx, model = L.last_usage(sid, ents)
         kind, _ = L.classify(sid, ents)
         p = by_sid.get(sid, {})
-        rows.append((m["name"], m["status"], ctx, model, p.get("pane_id", "-"),
-                     p.get("agent_status", "-"), kind, p.get("terminal_title_stripped", "")[:38]))
-    for n, st, ctx, model, pane, ast, kind, title in sorted(rows):
-        flag = "  <-- ROTATE" if ctx >= L.ROTATE_AT else ""
-        print(f"{n:12} {st:8} ctx={ctx:4}k {model:12} {pane:7} {ast:8} {kind:8} {title}{flag}")
+        rows.append((m["name"], m["status"], f"{ctx:4}k", model, p.get("pane_id", "-"),
+                     p.get("agent_status", "-"), kind,
+                     p.get("terminal_title_stripped", "")[:38],
+                     "  <-- ROTATE" if ctx >= L.ROTATE_AT else ""))
+    # A non-claude pane has no registry entry and no .jsonl, so its whole row comes from herdr
+    # plus the text on its screen. ctx is unknowable from outside, hence '-'.
+    side = L.sidecar_load()
+    for pane_id, p in L.agent_panes().items():
+        kind, _ = L.classify_pane(pane_id)
+        name = side.get(pane_id, {}).get("label") or p.get("label") or pane_id
+        ast = p.get("agent_status", "-")
+        rows.append((name, ast, "   -", p.get("agent", "?"), pane_id, ast, kind,
+                     p.get("terminal_title_stripped", "")[:38], ""))
+    for n, st, ctx, model, pane, ast, kind, title, flag in sorted(rows, key=lambda r: r[0]):
+        print(f"{n:12} {st:8} ctx={ctx} {model:12} {pane:7} {ast:8} {kind:8} {title}{flag}")
 
 
 def path_for(label):
@@ -166,7 +192,104 @@ def _accept_trust_dialog(pane, timeout=120):
     return None
 
 
-def cmd_spawn(label, prompt, model="sonnet", cwd=None, workspace=None, group=None):
+def _new_pane(label, cwd, group=None, workspace=None, env_args=()):
+    """A fresh pane for one agent: split into the `--group` tab while it has room, else a new tab.
+
+    At most PANES_PER_TAB panes in one tab. A 30-row window split six ways left each agent two
+    rows (2026-09-03): its dialogs rendered as one line and the watcher misread them as DONE.
+    Overflow goes to `<group>-2`, `<group>-3`, ...
+    """
+    env_args = list(env_args)
+    tab_label = group
+    if group:
+        tab = None
+        for n in range(1, 10):
+            tab_label = group if n == 1 else f"{group}-{n}"
+            t = next((t for t in L.tabs() if t.get("label", "").lower() == tab_label.lower()), None)
+            if t is None:
+                break                       # create this one below
+            if t.get("pane_count", 0) < PANES_PER_TAB:
+                tab = t
+                break
+        if tab:
+            in_tab = [p for p in L.panes() if p["tab_id"] == tab["tab_id"]]
+            anchor = in_tab[-1]["pane_id"]
+            direction = "right" if len(in_tab) % 2 == 1 else "down"
+            return L.herdr("pane", "split", "--pane", anchor, "--direction", direction,
+                           "--cwd", cwd, "--no-focus", *env_args)["result"]["pane"]["pane_id"]
+    args = ["tab", "create", "--cwd", cwd, "--label", tab_label or label, "--no-focus", *env_args]
+    if workspace:
+        args += ["--workspace", workspace]
+    return L.herdr(*args)["result"]["root_pane"]["pane_id"]
+
+
+# codex-cli's own bypass: `--dangerously-bypass-approvals-and-sandbox` is the exact analogue of
+# claude's `--dangerously-skip-permissions` (the TUI header then reads "permissions: YOLO mode").
+CODEX_FLAGS = ["--dangerously-bypass-approvals-and-sandbox"]
+CODEX_TRUST_MARK = "do you trust the contents of this directory"
+CODEX_HOOKS_MARK = "press t to trust all"
+
+
+def _codex_ready(pane, timeout=150):
+    """Clear codex's two first-open dialogs and wait for herdr to see the agent idle.
+
+    Both swallow the first prompt if you skip them (measured 2026-09-04: `herdr agent prompt`
+    returned agent_prompted and the text vanished into the hooks-review dialog). The directory
+    dialog takes Enter for "Yes, continue"; the hooks-review dialog takes Escape, which closes it
+    without trusting anything.
+    """
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        low = L.pane_read(pane, 45).lower()
+        if CODEX_TRUST_MARK in low:
+            L.send_keys(pane, "enter")
+            time.sleep(2)
+            continue
+        if CODEX_HOOKS_MARK in low:
+            L.send_keys(pane, "escape")
+            time.sleep(2)
+            continue
+        p = next((p for p in L.panes() if p.get("pane_id") == pane), {})
+        if p.get("agent") == "codex" and p.get("agent_status") in ("idle", "done"):
+            return True
+        time.sleep(2)
+    return False
+
+
+def cmd_spawn_codex(label, prompt, cwd=None, workspace=None, group=None, report=""):
+    """A codex-cli pane. No model tier (codex picks its own), no session id, no ctx - the board
+    reads its state off herdr and off the text on its screen."""
+    cwd = cwd or L.DEFAULT_CWD
+    prompt = prompt + " " + orch_line("codex", report)
+    pane = _new_pane(label, cwd, group, workspace)
+    L.herdr("pane", "rename", pane, label)
+
+    started = L.herdr("agent", "start", label, "--kind", "codex", "--pane", pane,
+                      "--timeout", "90000", "--", *CODEX_FLAGS, timeout=120, soft=True)
+    if not (started or {}).get("result"):
+        # On Windows `codex` on PATH is an npm .cmd/.ps1 shim, and herdr's launcher runs
+        # `Start-Process -FilePath codex`, which rejects it: "%1 is not a valid Win32
+        # application" (2026-09-04). Typing the same command into the pane shell starts the
+        # identical TUI and herdr still detects `agent: codex` on the pane.
+        L.herdr("pane", "send-text", pane, "codex " + " ".join(CODEX_FLAGS), soft=True)
+        L.send_keys(pane, "enter")
+    if not _codex_ready(pane):
+        sys.exit(f"codex did not come up in pane {pane}:\n{L.pane_read(pane, 30)}")
+
+    L.sidecar_put(pane, label=label, kind="codex", report=report, cwd=cwd,
+                  started=datetime.datetime.now().isoformat(timespec="seconds"))
+    L.herdr("agent", "prompt", pane, prompt)
+    print(f"spawned {label} pane={pane} kind=codex"
+          + (f" report={report}" if report else ""))
+    return pane, None
+
+
+def cmd_spawn(label, prompt, model="sonnet", cwd=None, workspace=None, group=None,
+              kind="claude", report=""):
+    if kind != "claude":
+        if kind != "codex":
+            sys.exit(f"unknown --kind {kind!r}; this skill spawns {' or '.join(L.KINDS)}")
+        return cmd_spawn_codex(label, prompt, cwd, workspace, group, report)
     cwd = cwd or L.DEFAULT_CWD
     if prompt.startswith("@"):
         f = prompt[1:]
@@ -184,33 +307,7 @@ def cmd_spawn(label, prompt, model="sonnet", cwd=None, workspace=None, group=Non
     for attempt in (1, 2):
         env_args = account_env_args()
 
-        pane = None
-        tab_label = group
-        if group:
-            # At most PANES_PER_TAB panes in one tab. A 30-row window split six ways left each
-            # claude with two rows (2026-09-03): its dialogs rendered as one line and the
-            # watcher misread them as DONE. Overflow goes to `<group>-2`, `<group>-3`, ...
-            tab = None
-            for n in range(1, 10):
-                tab_label = group if n == 1 else f"{group}-{n}"
-                t = next((t for t in L.tabs() if t.get("label", "").lower() == tab_label.lower()), None)
-                if t is None:
-                    break                       # create this one below
-                if t.get("pane_count", 0) < PANES_PER_TAB:
-                    tab = t
-                    break
-            if tab:
-                in_tab = [p for p in L.panes() if p["tab_id"] == tab["tab_id"]]
-                anchor = in_tab[-1]["pane_id"]
-                direction = "right" if len(in_tab) % 2 == 1 else "down"
-                pane = L.herdr("pane", "split", "--pane", anchor, "--direction", direction,
-                               "--cwd", cwd, "--no-focus", *env_args)["result"]["pane"]["pane_id"]
-        if pane is None:
-            args = ["tab", "create", "--cwd", cwd, "--label", tab_label or label, "--no-focus", *env_args]
-            if workspace:
-                args += ["--workspace", workspace]
-            pane = L.herdr(*args)["result"]["root_pane"]["pane_id"]
-
+        pane = _new_pane(label, cwd, group, workspace, env_args)
         L.herdr("pane", "rename", pane, label)
         # -n/--name sets the session display name, so the pane label and the peer-messaging name
         # stop drifting apart - two sessions landing on the same random suffix made SendMessage
@@ -342,7 +439,26 @@ def cmd_hide(name):
         print(f"{m['name']} moved to a new tab '{label}' (its old tab is gone)")
 
 
+def agent_pane_for(name):
+    """A non-claude pane by its sidecar label, its herdr pane label, or its pane id.
+
+    `resolve()` cannot find one: it goes through the session registry, and Codex writes no entry
+    there."""
+    side = L.sidecar_load()
+    for pane_id, p in L.agent_panes().items():
+        if name in (pane_id, p.get("label"), side.get(pane_id, {}).get("label")):
+            return pane_id, p
+    return None, None
+
+
 def cmd_kill(name, quiet=False):
+    pane_id, p = agent_pane_for(name)
+    if p is not None:
+        L.herdr("pane", "close", pane_id)
+        L.sidecar_drop(pane_id)
+        if not quiet:
+            print(f"killed {name}: closed herdr pane {pane_id} (kind={p.get('agent')})")
+        return None
     m = L.resolve(name)
     if not m:
         sys.exit(f"no live session named {name} (name, session-id prefix, or pane id)")
@@ -685,6 +801,16 @@ def cmd_rotate_self(model="fable", group=None, cwd=None, dry=False):
 
     group = group or L.ORCHESTRATOR_TAB
     cwd = cwd or L.DEFAULT_CWD
+    # Only the orchestrator itself may rotate the orchestrator. Claude Code exports the caller's
+    # own id as CLAUDE_CODE_SESSION_ID; on 2026-09-04 a throwaway test session ran this command,
+    # it resolved the seat by tab label, relabelled the live orchestrator `orch-retiring`, and
+    # spawned a replacement whose first order was to kill it. Set ORCH_ALLOW_FOREIGN_ROTATE=1
+    # only when running it deliberately from outside.
+    caller = os.environ.get("CLAUDE_CODE_SESSION_ID", "")
+    seat = L.orchestrator_sid() or ""
+    if caller and seat and caller != seat and not os.environ.get("ORCH_ALLOW_FOREIGN_ROTATE"):
+        sys.exit(f"refusing: rotate-self was called from session {caller[:8]} but the orchestrator "
+                 f"seat is {seat[:8]}. Run it from the orchestrator, or set ORCH_ALLOW_FOREIGN_ROTATE=1.")
     me = L.orchestrator_name()
     s = B.load()
     open_qs = [q for q in s["questions"] if not q.get("answered")]
@@ -722,19 +848,44 @@ def cmd_rotate_self(model="fable", group=None, cwd=None, dry=False):
 
 # ---------------------------------------------------------------- task intake
 
-def cmd_task(label, goal, done, out=None, model="sonnet", group=None, cwd=None):
+CLAUDE_REPORT_TO = (
+    "{orchestrator} - `SendMessage` it your final report, and any question you hit.\n"
+    "It speaks for the human on small reversible decisions; act on its answers as theirs.")
+
+# Codex has no SendMessage and no peer messaging at all, so its report is a file the watcher
+# looks for, and the bare word DONE on the last line is how it says it has stopped.
+CODEX_REPORT_TO = (
+    "You cannot send messages to another session. Write your final report to `{report}` - what you\n"
+    "did, the exact commands you ran, and the proof - then print `DONE` on its own line as the last\n"
+    "line of your reply. The orchestrator ({orchestrator}) watches for that file and reads it.\n"
+    "A question you cannot answer goes in the same file; print `DONE` anyway so it gets read.")
+
+CLAUDE_SHELL_RULE = ("Never `cd X && ...` in the Bash tool; use absolute paths. "
+                     "Never a heredoc in Bash; use the Write tool.")
+CODEX_SHELL_RULE = "Never `cd X && ...` in a shell call; use absolute paths."
+
+
+def cmd_task(label, goal, done, out=None, model="sonnet", group=None, cwd=None,
+             kind="claude", report=None):
     cwd = cwd or L.DEFAULT_CWD
     os.makedirs(L.HANDOFFS, exist_ok=True)
     stamp = datetime.datetime.now().strftime("%Y-%m-%d-%H%M")
     path = os.path.join(L.HANDOFFS, f"task-{label}-{stamp}.md")
+    orchestrator = L.orchestrator_name()
+    if kind == "claude":
+        report, report_to, shell_rule = "", CLAUDE_REPORT_TO, CLAUDE_SHELL_RULE
+    else:
+        report = report or os.path.join(L.HANDOFFS, f"report-{label}.md")
+        report_to, shell_rule = CODEX_REPORT_TO, CODEX_SHELL_RULE
     body = open(TASK_TEMPLATE, encoding="utf-8").read().format(
         label=label, goal=goal, done=done, cwd=cwd,
-        out=out or "(none - report by SendMessage)",
-        orchestrator=L.orchestrator_name())
+        out=out or (report if report else "(none - report by SendMessage)"),
+        shell_rule=shell_rule,
+        report_to=report_to.format(orchestrator=orchestrator, report=report))
     open(path, "w", encoding="utf-8").write(body)
     print(f"task file: {path}")
     cmd_spawn(label, f"Read {path} and do exactly what it says.",
-              model=model, cwd=cwd, group=group)
+              model=model, cwd=cwd, group=group, kind=kind, report=report)
     return path
 
 
@@ -785,12 +936,14 @@ def main():
         cmd_path(a[1])
     elif cmd == "spawn":
         cmd_spawn(a[1], a[2], _opt(a, "--model", "sonnet"), _opt(a, "--cwd"),
-                  _opt(a, "--workspace"), _opt(a, "--group"))
+                  _opt(a, "--workspace"), _opt(a, "--group"),
+                  _opt(a, "--kind", "claude"), _opt(a, "--report", ""))
     elif cmd == "rotate":
         cmd_rotate(a[1], _opt(a, "--model", "sonnet"), _opt(a, "--group"), _opt(a, "--cwd"))
     elif cmd == "task":
         cmd_task(a[1], _opt(a, "--goal", ""), _opt(a, "--done", ""), _opt(a, "--out"),
-                 _opt(a, "--model", "sonnet"), _opt(a, "--group"), _opt(a, "--cwd"))
+                 _opt(a, "--model", "sonnet"), _opt(a, "--group"), _opt(a, "--cwd"),
+                 _opt(a, "--kind", "claude"), _opt(a, "--report"))
     elif cmd == "reap":
         cmd_reap(int(_opt(a, "--hours", 6)), "--dry-run" in a)
     elif cmd == "kill":

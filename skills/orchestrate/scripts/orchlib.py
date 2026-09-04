@@ -344,28 +344,37 @@ def last_tool_error(lines):
     return False
 
 
-def classify(sid, entries=None):
-    """Why a session stopped -> (QUESTION|BLOCKED|OFFER|ERROR|DONE, last 300 chars it said).
+def classify_words(text, tool_error=False):
+    """The word rules alone: last words -> QUESTION|BLOCKED|OFFER|ERROR|DONE.
 
-    Only DONE is safe to auto-close. Order matters: BLOCKED outranks everything because it names an
-    exact command a human must paste, and a question outranks an error mention, because the session
-    is waiting on a human either way and the question is what to read.
+    Split out of `classify` so a pane-text agent (Codex, Gemini) is judged by exactly the same
+    rules as a Claude session read from its log - the two can never drift apart.
+
+    Order matters: BLOCKED outranks everything because it names an exact command a human must
+    paste, and a question outranks an error mention, because the agent is waiting on a human
+    either way and the question is what to read.
     """
-    entries = tail_entries(sid) if entries is None else entries
-    text = last_assistant_text(entries)
     tail = text.lower()[-600:]      # how it ENDED; scanning the whole report calls every long
                                     # write-up an ERROR because it mentions the word once
     if any(k in tail for k in BLOCKED_MARKS):
-        kind = "BLOCKED"
-    elif text.rstrip().endswith("?") or any(k in tail for k in QUESTION_MARKS):
-        kind = "QUESTION"
-    elif any(k in tail for k in OFFER_MARKS):
-        kind = "OFFER"
-    elif last_tool_error(entries) or any(k in tail for k in ERROR_MARKS):
-        kind = "ERROR"
-    else:
-        kind = "DONE"
-    return kind, text[-300:]
+        return "BLOCKED"
+    if text.rstrip().endswith("?") or any(k in tail for k in QUESTION_MARKS):
+        return "QUESTION"
+    if any(k in tail for k in OFFER_MARKS):
+        return "OFFER"
+    if tool_error or any(k in tail for k in ERROR_MARKS):
+        return "ERROR"
+    return "DONE"
+
+
+def classify(sid, entries=None):
+    """Why a session stopped -> (QUESTION|BLOCKED|OFFER|ERROR|DONE, last 300 chars it said).
+
+    Only DONE is safe to auto-close.
+    """
+    entries = tail_entries(sid) if entries is None else entries
+    text = last_assistant_text(entries)
+    return classify_words(text, last_tool_error(entries)), text[-300:]
 
 
 def blocked_command(text):
@@ -385,6 +394,104 @@ def blocked_command(text):
                             "herdr", "vercel", "node", "curl", "code"):
             return s
     return ""
+
+
+# ---------------------------------------------------------------- other agent kinds
+
+# `herdr agent start --kind` accepts many agents; these are the ones this skill knows how to
+# spawn and read. Anything other than `claude` has no `~/.claude/sessions` entry and no `.jsonl`,
+# so its whole board row is built from herdr plus the text on its screen.
+KINDS = ("claude", "codex")
+
+# Where the report file and label for a non-claude pane are remembered. herdr already reports the
+# agent kind on the pane itself, so this holds only what herdr cannot know.
+AGENT_SIDECAR = os.path.join(BOARD_DIR, "agent-panes.json")
+
+
+def agent_panes():
+    """{pane_id: pane} for every herdr pane running a non-claude agent."""
+    return {p["pane_id"]: p for p in panes()
+            if p.get("agent") and p.get("agent") != "claude"}
+
+
+def sidecar_load():
+    try:
+        with open(AGENT_SIDECAR, encoding="utf-8") as fh:
+            d = json.load(fh)
+    except (OSError, ValueError):
+        return {}
+    return d if isinstance(d, dict) else {}
+
+
+def sidecar_put(pane, **fields):
+    d = sidecar_load()
+    d.setdefault(pane, {}).update(fields)
+    os.makedirs(BOARD_DIR, exist_ok=True)
+    with open(AGENT_SIDECAR, "w", encoding="utf-8") as fh:
+        json.dump(d, fh, indent=2)
+    return d[pane]
+
+
+def sidecar_drop(pane):
+    d = sidecar_load()
+    if d.pop(pane, None) is None:
+        return
+    with open(AGENT_SIDECAR, "w", encoding="utf-8") as fh:
+        json.dump(d, fh, indent=2)
+
+
+# Frame and furniture a TUI paints around whatever the agent actually said.
+TUI_CHROME = ("ask codex to do anything", "esc to interrupt", "press enter to continue",
+              "/model to change", "ctrl+c to quit", "send with enter", "tip: ",
+              "usage limit resets available", "to enable our fastest inference")
+TUI_BOX = set("-_=|/\\ ") | set("─│┌┐└┘├┤┬┴"
+                                "┼═║╔╗╚╝╱╲╴"
+                                "╵╶╷▀▄█▌▐░▒"
+                                "▓●╭╮╯╰━┃╌")
+BULLETS = ("•", "›", ">", "*")
+
+
+def pane_last_text(txt):
+    """What the agent itself last printed in a TUI pane, with the frame stripped.
+
+    Keeps only real content lines, then cuts back to the last bullet the agent printed - in
+    Codex that is the `•` in front of each of its own messages, so the result is its last say
+    rather than the whole visible scrollback."""
+    keep = []
+    for raw in txt.splitlines():
+        s = raw.strip().strip("│┃|").strip()
+        if not s or set(s) <= TUI_BOX:
+            continue
+        low = s.lower()
+        if any(c in low for c in TUI_CHROME):
+            continue
+        keep.append(s)
+    # the status footer under the input box ("gpt-5.6-sol xhigh - ~\.claude") is the last thing
+    # on screen and would otherwise become the agent's "last words"
+    while keep and " · " in keep[-1]:
+        keep.pop()
+    for i in range(len(keep) - 1, -1, -1):
+        if keep[i][:1] in BULLETS:
+            keep = keep[i:]
+            break
+    return "\n".join(keep).strip()
+
+
+def classify_pane(pane, txt=None, lines=40):
+    """Why a non-claude pane stopped -> (kind, last 300 chars it printed).
+
+    Same word rules as `classify`, read off the screen instead of a log. A pane whose last line
+    is the bare word DONE is taken at its word: that is the contract `orch.py task --kind codex`
+    writes into the task file, because Codex has no SendMessage to report with.
+    """
+    txt = pane_read(pane, lines) if txt is None else txt
+    text = pane_last_text(txt)
+    if not text:
+        return "DONE", ""
+    last = text.splitlines()[-1].strip().strip("*_`.• ").upper()
+    if last == "DONE":
+        return "DONE", text[-300:]
+    return classify_words(text), text[-300:]
 
 
 # ---------------------------------------------------------------- pane mode

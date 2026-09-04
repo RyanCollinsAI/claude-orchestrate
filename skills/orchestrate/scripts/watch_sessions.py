@@ -5,6 +5,9 @@
 Emits:
   NEW session <name> status=<s>
   GONE session <name> (exited)
+  NEW codex <name> pane=<id>                                    a non-claude agent pane appeared
+  GONE codex <name> (pane closed)
+  <name> REPORT | <path> (<n> bytes)                            a codex task's report file landed
   <name> QUESTION|BLOCKED|OFFER|ERROR|DONE | <last 300 chars it said>  when it has genuinely stopped
   <name> PROMPT | <the permission question>                     pane stuck on a prompt
   <name> MODE auto | <pane>                                     pane came up in auto, not bypass
@@ -90,6 +93,10 @@ said_prompt = set()
 said_mode = set()        # sids already warned that the pane is in auto, not bypass
 ready_since = {}         # sid -> time it first became idle/waiting + pane idle/done
 last_said = {}           # sid -> text of the last stop-reason line emitted for it
+prev_agents = {}         # pane_id -> (label, kind) for non-claude panes, previous poll
+agent_ready = {}         # pane_id -> time that pane first went idle/done
+agent_said = {}          # pane_id -> last stop-reason text emitted for it
+said_report = set()      # pane_ids whose report file has already been announced
 first = True
 last_reap = 0
 loop = 0
@@ -186,6 +193,44 @@ while True:
                     if q and sid not in said_prompt:
                         print(f"{name} PROMPT | {q[:200]}", flush=True)
                         said_prompt.add(sid)
+
+            # non-claude panes (codex): no registry entry and no .jsonl, so everything below comes
+            # from herdr plus the text on the pane. Same word rules, same READY_HOLD, same dedup.
+            side = L.sidecar_load()
+            cur_agents = {}
+            for pane_id, p in L.agent_panes().items():
+                label = side.get(pane_id, {}).get("label") or p.get("label") or pane_id
+                cur_agents[pane_id] = (label, p.get("agent", "?"), p.get("agent_status"))
+            for pane_id, (name, akind, _) in cur_agents.items():
+                if pane_id not in prev_agents:
+                    print(f"NEW {akind} {name} pane={pane_id}", flush=True)
+            for pane_id, (name, akind, _) in prev_agents.items():
+                if pane_id not in cur_agents:
+                    print(f"GONE {akind} {name} (pane closed)", flush=True)
+                    agent_ready.pop(pane_id, None)
+                    agent_said.pop(pane_id, None)
+                    said_report.discard(pane_id)
+
+            for pane_id, (name, akind, ast) in cur_agents.items():
+                rep = side.get(pane_id, {}).get("report")
+                if rep and pane_id not in said_report and os.path.exists(rep):
+                    print(f"{name} REPORT | {rep} ({os.path.getsize(rep)} bytes)", flush=True)
+                    said_report.add(pane_id)
+                if ast not in ("idle", "done"):
+                    agent_ready.pop(pane_id, None)
+                    continue
+                since = agent_ready.setdefault(pane_id, now)
+                # reading a pane costs a subprocess each, so only classify on a scan pass
+                if now - since < READY_HOLD or loop % PANE_EVERY:
+                    continue
+                kind, said = L.classify_pane(pane_id)
+                if not said or agent_said.get(pane_id) == said:
+                    continue
+                print(f"{name} {kind} | {said}", flush=True)
+                if kind in ("QUESTION", "BLOCKED", "ERROR"):
+                    to_board(kind, name, said)
+                agent_said[pane_id] = said
+            prev_agents = cur_agents
 
             if now - last_reap > REAP_EVERY:
                 n = len(reap_candidates(REAP_HOURS))
