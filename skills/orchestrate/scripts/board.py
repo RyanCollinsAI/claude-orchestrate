@@ -6,12 +6,12 @@ without reopening. Every command below renders at the end, so the HTML is never 
 
   py board.py add-question --id q5 --title "..." --context-file x.md
         [--context "..."] [--option A="..." --option B="..."] [--pick A --why "..."]
-        [--input a="a =" --input b="b ="] [--from cg4-askbox]
+        [--input a="a =" --input b="b ="] [--from cg4-askbox] [--group web-app]
   py board.py answer q5 "A"                     mark answered, move it to Done
-  py board.py show --caption "..." (--file x.md | --text "...") [--for q5]
+  py board.py show --caption "..." (--file x.md | --text "...") [--for q5] [--group web-app]
   py board.py session <pane> --doing "..." --model opus --state working
   py board.py sessions --from-ls                fill the table from the live herdr/registry board
-  py board.py done "text"                       one line under "Done since your last look"
+  py board.py done "text" [--group web-app]  one line under "Done since your last look"
   py board.py render                            rewrite board.html from state.json
   py board.py open                              lavish-axi board.html, print the URL
   py board.py prune [--days 1]                  drop old Done lines
@@ -20,6 +20,12 @@ without reopening. Every command below renders at the end, so the HTML is never 
 The rule, set 2026-09-03: a question carries the real thing - the code block, the picture,
 the table, the diagram - never a one-line summary of it. `context_md` is markdown and may hold
 ```mermaid fences, $$math$$, ![img](relative.png), tables and code fences; all four render.
+
+Tabs, set 2026-09-04: every item on the board carries a `group` - the herdr tab a pane spawned
+into (`--group` on `orch.py spawn`). Podium builds one tab per group plus All, and filters Show,
+Sessions and Done by the selected tab; Needs You always shows every open question regardless of
+tab. `--group` on add-question/show/done wins outright; otherwise it is looked up live from
+`--from`/`--for`/the pane itself, falling back to `""` (All only). See `board/schema.md`.
 """
 import argparse, datetime, glob, json, os, re, shutil, subprocess, sys
 
@@ -45,7 +51,8 @@ def now_iso():
 
 def default_state():
     return {"updated": now_iso(), "header": {"usage": "", "note": ""},
-            "questions": [], "show": [], "sessions": [], "done": []}
+            "questions": [], "show": [], "sessions": [], "done": [], "updates": [],
+            "next_qid": 1}
 
 
 def load():
@@ -55,8 +62,20 @@ def load():
         s = json.load(open(STATE, encoding="utf-8"))
     except Exception as e:
         sys.exit(f"{STATE} is not readable JSON ({e}); fix or delete it")
+    had_counter = "next_qid" in s
     for k, v in default_state().items():
         s.setdefault(k, v)
+    if not had_counter:
+        # Upgrading a pre-counter state.json: start ahead of every id still on the board, so the
+        # very next auto-post can't collide with one a human is currently looking at. It cannot
+        # know about ids already pruned before this field existed - those are gone either way.
+        nums = [int(m.group(1)) for q in s["questions"]
+                for m in [re.match(r"q(\d+)$", q.get("id", ""))] if m]
+        if nums:
+            s["next_qid"] = max(nums) + 1
+    for coll in ("questions", "show", "sessions", "done"):
+        for item in s.get(coll, []):
+            item.setdefault("group", "")
     return s
 
 
@@ -82,11 +101,24 @@ def save(s, render=True):
 
 
 def next_qid(s):
+    """Monotonic, never reused - even after `prune` drops an old answered question from
+    `questions[]`. Two auto-posted questions naming the same small id at different times read as
+    the same question to a human who remembers Q1 was about something else entirely (2026-09-04)."""
     used = {q.get("id", "") for q in s["questions"]}
-    n = 1
+    n = max(s.get("next_qid", 1), 1)
     while f"q{n}" in used:
         n += 1
+    s["next_qid"] = n + 1
     return f"q{n}"
+
+
+def bump_qid_past(s, qid):
+    """An explicit --id skips next_qid() entirely, so the counter has to be told about it by hand -
+    otherwise the very next auto-picked id can still land back on a hand-picked one that's since
+    been pruned. A no-op for anything that isn't the qN shape."""
+    m = re.match(r"q(\d+)$", qid or "")
+    if m:
+        s["next_qid"] = max(s.get("next_qid", 1), int(m.group(1)) + 1)
 
 
 # ---------------------------------------------------------------- markdown in, images alongside
@@ -147,6 +179,39 @@ def kv(pairs, what):
     return out
 
 
+# ---------------------------------------------------------------- groups (board tabs)
+
+def group_for_who(who):
+    """The herdr tab label a pane or session display name lives in right now - the same string
+    --group filed it under at spawn time. An overflow tab ('web-app-2', from orch.py's
+    cap-3-panes-per-tab rule) folds back to its base group. '' when nothing live matches: the
+    session already ended, or this is the orchestrator's own write with no session behind it.
+    Board.py's callers pass this through --group when they already know it, so a live lookup is
+    only the fallback, not the only path."""
+    if not who:
+        return ""
+    p = next((pp for pp in L.panes() if pp.get("label") == who), None)
+    if not p:
+        sid = next((sid for sid, m in L.sessions().items() if m.get("name") == who), None)
+        p = L.panes_by_sid().get(sid) if sid else None
+    if not p:
+        return ""
+    tab = L.tab_label(p.get("tab_id"))
+    return re.sub(r"-\d+$", "", tab) if tab else ""
+
+
+def resolve_group(explicit, who=None, inherit=""):
+    """--group wins outright; else a live pane/session lookup; else whatever the caller says to
+    inherit (a show block takes its linked question's group); else '' (Needs-you strip only)."""
+    if explicit:
+        return explicit
+    if who:
+        g = group_for_who(who)
+        if g:
+            return g
+    return inherit or ""
+
+
 # ---------------------------------------------------------------- commands
 
 def cmd_add_question(a):
@@ -154,11 +219,15 @@ def cmd_add_question(a):
     qid = a.id or next_qid(s)
     if any(q.get("id") == qid for q in s["questions"]):
         sys.exit(f"{qid} already exists; pick another --id or answer that one first")
-    q = {"id": qid, "title": a.title, "from": getattr(a, "from_") or "",
+    if a.id:
+        bump_qid_past(s, a.id)
+    from_ = getattr(a, "from_") or ""
+    q = {"id": qid, "title": a.title, "from": from_,
          "context_md": read_md(a.context, a.context_file),
          "options": [{"value": k, "label": v} for k, v in kv(a.option, "option")],
          "pick": a.pick or "", "pick_why": a.why or "",
          "inputs": [{"name": k, "label": v, "width": 70} for k, v in kv(a.input, "input")],
+         "group": resolve_group(getattr(a, "group", None), from_),
          "created": now_iso(), "answered": None, "answer": None}
     s["questions"].append(q)
     save(s)
@@ -169,11 +238,15 @@ def cmd_add_question(a):
 def add_question_dict(q):
     """Same as add-question, for callers already holding a dict (watch_sessions.py)."""
     s = load()
-    q.setdefault("id", next_qid(s))
+    if "id" in q:
+        bump_qid_past(s, q["id"])
+    else:
+        q["id"] = next_qid(s)
     q.setdefault("created", now_iso())
     for k, v in (("from", ""), ("options", []), ("pick", ""), ("pick_why", ""),
                  ("inputs", []), ("answered", None), ("answer", None), ("context_md", "")):
         q.setdefault(k, v)
+    q.setdefault("group", group_for_who(q.get("from", "")))
     s["questions"].append(q)
     save(s)
     return q["id"]
@@ -196,7 +269,7 @@ def cmd_answer(a):
                      if d.get("text") != f"{a.qid.upper()} {q.get('title', '')}: {q['answer']}"]
     q["answered"] = now_iso()
     q["answer"] = a.answer
-    s["done"].insert(0, {"ts": now_iso(), "text": line})
+    s["done"].insert(0, {"ts": now_iso(), "text": line, "group": q.get("group", "")})
     save(s)
     print(f"answered {a.qid}: {a.answer}")
 
@@ -206,19 +279,26 @@ def cmd_show(a):
     body = read_md(a.text, a.file)
     if not body.strip():
         sys.exit("show needs --file or --text")
+    for_ = getattr(a, "for_") or ""
+    qref = next((x for x in s["questions"] if x.get("id") == for_), None) if for_ else None
+    group = resolve_group(getattr(a, "group", None), inherit=qref.get("group", "") if qref else "")
     sid = "s" + str(len(s["show"]) + 1)
     s["show"].insert(0, {"id": sid, "caption": a.caption or "", "body_md": body,
-                         "for": getattr(a, "for_") or "", "created": now_iso()})
+                         "for": for_, "created": now_iso(), "group": group})
     save(s)
     print(f"show {sid}: {a.caption or '(no caption)'}")
     return sid
 
 
-def add_show(caption, body_md, for_=""):
+def add_show(caption, body_md, for_="", group=""):
     s = load()
+    if not group and for_:
+        qref = next((x for x in s["questions"] if x.get("id") == for_), None)
+        if qref:
+            group = qref.get("group", "")
     sid = "s" + str(len(s["show"]) + 1)
     s["show"].insert(0, {"id": sid, "caption": caption, "body_md": body_md,
-                         "for": for_, "created": now_iso()})
+                         "for": for_, "created": now_iso(), "group": group})
     save(s)
     return sid
 
@@ -227,11 +307,13 @@ def cmd_session(a):
     s = load()
     row = next((x for x in s["sessions"] if x.get("pane") == a.pane), None)
     if not row:
-        row = {"pane": a.pane, "doing": "", "model": "", "state": "working", "note": ""}
+        row = {"pane": a.pane, "doing": "", "model": "", "state": "working", "note": "",
+               "group": group_for_who(a.pane)}
         s["sessions"].append(row)
     for k, v in (("doing", a.doing), ("model", a.model), ("state", a.state), ("note", a.note)):
         if v is not None:
             row[k] = v
+    row.setdefault("group", group_for_who(a.pane))
     save(s)
     print(f"session {a.pane}: {row['state']}")
 
@@ -254,12 +336,35 @@ def live_sessions():
         kind, said = L.classify(sid, ents)
         p = by_sid.get(sid, {})
         state = "working" if m["status"] == "busy" else KIND_STATE.get(kind, "working")
+        tab = L.tab_label(p.get("tab_id")) if p else ""
+        ts = L.last_assistant_ts(sid, ents)
         rows.append({"pane": p.get("label") or m["name"],
-                     "doing": (p.get("terminal_title_stripped") or said)[:60],
+                     # its own newest message first - a terminal title is often stale or generic
+                     "doing": (said or p.get("terminal_title_stripped") or "")[:60],
                      "model": model.replace("-5", "").replace("-4-5-20251001", "") or "?",
                      "state": state,
-                     "note": f"ctx {ctx}k" + ("  <-- ROTATE" if ctx >= L.ROTATE_AT else "")})
+                     "note": f"ctx {ctx}k" + ("  <-- ROTATE" if ctx >= L.ROTATE_AT else ""),
+                     "group": re.sub(r"-\d+$", "", tab) if tab else "",
+                     "updated": (datetime.datetime.fromtimestamp(ts).astimezone()
+                                 .replace(microsecond=0).isoformat() if ts else "")})
     return sorted(rows, key=lambda r: r["pane"])
+
+
+def sync_board(session_rows=None, new_updates=None, cap_updates=50):
+    """One load-modify-save for watch_sessions.py's poll loop: refresh every live session's row by
+    pane, and prepend fresh entries to the Updates feed. Bulk on purpose - one call per poll beats
+    one save per pane, since every `save()` is a full read-modify-write of the same file another
+    process (board_watch.py, a human running `board.py answer`) could be writing at the same
+    moment."""
+    s = load()
+    if session_rows:
+        by_pane = {r["pane"]: r for r in s["sessions"]}
+        for r in session_rows:
+            by_pane[r["pane"]] = {**by_pane.get(r["pane"], {}), **r}
+        s["sessions"] = sorted(by_pane.values(), key=lambda r: r["pane"])
+    if new_updates:
+        s["updates"] = (list(new_updates) + s.get("updates", []))[:cap_updates]
+    save(s)
 
 
 def cmd_sessions(a):
@@ -276,7 +381,7 @@ def cmd_sessions(a):
 
 def cmd_done(a):
     s = load()
-    s["done"].insert(0, {"ts": now_iso(), "text": a.text})
+    s["done"].insert(0, {"ts": now_iso(), "text": a.text, "group": getattr(a, "group", None) or ""})
     save(s)
     print("done: " + a.text)
 
@@ -398,10 +503,10 @@ def write_plain(s):
     for r in s["sessions"]:
         out.append(f"<div class='card'>{esc(r.get('pane'))} - {esc(r.get('state'))} - "
                    f"{esc(r.get('doing'))}</div>")
-    body = "\n".join(out) or "<div class='card'>Board is empty.</div>"
+    body = "\n".join(out) or "<div class='card'>Podium is empty.</div>"
     page = (f"<!doctype html><html lang='en'><head><meta charset='utf-8'>"
-            f"<title>Orchestrator Board (plain)</title><style>{CSS}</style></head><body>"
-            f"<div class='wrap'><h1>Orchestrator Board</h1>"
+            f"<title>Podium (plain)</title><style>{CSS}</style></head><body>"
+            f"<div class='wrap'><h1>Podium</h1>"
             f"<p class='small'>Script-free copy, {esc(s['updated'])}.</p>{body}</div></body></html>")
     tmp = PLAIN + ".tmp"
     open(tmp, "w", encoding="utf-8").write(page)
@@ -422,8 +527,15 @@ CSS = """
   .q .num{display:inline-block;font-weight:700;color:var(--ask);margin-right:8px}
   .q .title{font-weight:600}
   .q .from{color:var(--mute);font-size:12px}
+  .groupTag{display:inline-block;font-size:11px;color:var(--mute);border:1px solid var(--line);border-radius:999px;padding:0 8px;margin-left:6px}
   .ctx{color:var(--mute);font-size:14px;margin:4px 0 8px}
   .ctx p{margin:6px 0}
+  .mdwrap{overflow-x:auto}
+  .tabbar{display:flex;gap:6px;flex-wrap:wrap;margin:14px 0 20px}
+  .tab{font:inherit;border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:999px;padding:5px 14px;font-size:13px;cursor:pointer}
+  .tab.active{background:var(--ink);color:#fff;border-color:var(--ink)}
+  .tab .badge{display:inline-block;margin-left:6px;font-size:11px;padding:0 6px;border-radius:999px;background:var(--askbg);color:var(--ask)}
+  .tab.active .badge{background:rgba(255,255,255,.28);color:#fff}
   .ctx code,.small code{background:#f1efe9;border-radius:4px;padding:1px 4px;font:13px ui-monospace,Consolas,monospace}
   .opts{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}
   .opts label{display:flex;gap:6px;align-items:center;border:1px solid var(--line);background:#fff;border-radius:8px;padding:6px 10px;cursor:pointer}
@@ -466,6 +578,46 @@ const qEls = new Map();          // question id -> {el, json}; a card is rebuilt
 
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g,
   c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+// Which project tab is selected. Lives in a plain variable, not just localStorage, so a 5 s
+// state.js poll (which never reloads the page - only a changed board.html on disk does that) can
+// never reset it mid-session. localStorage is only there so a later page open remembers it too;
+// Lavish runs this in a sandboxed iframe with an opaque origin, where storage access can throw, so
+// every touch of it is wrapped and the in-memory variable is always the source of truth.
+let activeTab = 'All';
+try { activeTab = localStorage.getItem('board.tab') || 'All'; } catch (e) { /* storage blocked */ }
+
+function groupsInState(){
+  const set = new Set();
+  for (const coll of [state.questions, state.show, state.sessions, state.done, state.updates])
+    for (const item of coll || []) if (item && item.group) set.add(item.group);
+  return ['All', ...[...set].sort()];
+}
+
+function tabCount(tab){
+  const openQ = (state.questions || []).filter(q => !q.answered);
+  const working = (state.sessions || []).filter(r => r.state === 'working');
+  const inTab = x => tab === 'All' || (x.group || '') === tab;
+  return openQ.filter(inTab).length + working.filter(inTab).length;
+}
+
+function setActiveTab(t){
+  activeTab = t;
+  try { localStorage.setItem('board.tab', t); } catch (e) { /* storage blocked */ }
+  renderTabs(); renderShow(); renderSessions(); renderUpdates(); renderDone();
+}
+
+function renderTabs(){
+  const tabs = groupsInState();
+  if (!tabs.includes(activeTab)) activeTab = 'All';
+  document.getElementById('tabs').innerHTML = tabs.map(t => {
+    const n = tabCount(t);
+    return '<button type="button" class="tab' + (t === activeTab ? ' active' : '') + '" data-tab="' +
+           esc(t) + '">' + esc(t) + (n ? ' <span class="badge">' + n + '</span>' : '') + '</button>';
+  }).join('');
+  for (const b of document.querySelectorAll('#tabs .tab'))
+    b.addEventListener('click', () => setActiveTab(b.dataset.tab));
+}
 
 function mdToHtml(src){
   src = String(src == null ? '' : src);
@@ -526,8 +678,9 @@ function questionCard(q){
   f.setAttribute('data-lavish-question', q.id);
   let h = '<div><span class="num">' + esc(String(q.id).toUpperCase()) + '</span>' +
           '<span class="title">' + esc(q.title) + '</span>' +
-          (q.from ? ' <span class="from">from ' + esc(q.from) + '</span>' : '') + '</div>';
-  if (q.context_md) h += '<div class="ctx">' + mdToHtml(q.context_md) + '</div>';
+          (q.from ? ' <span class="from">from ' + esc(q.from) + '</span>' : '') +
+          (q.group ? ' <span class="groupTag">' + esc(q.group) + '</span>' : '') + '</div>';
+  if (q.context_md) h += '<div class="ctx"><div class="mdwrap">' + mdToHtml(q.context_md) + '</div></div>';
   if (q.options && q.options.length){
     h += '<div class="opts">';
     for (const o of q.options){
@@ -579,29 +732,45 @@ function renderQuestions(){
 function renderShow(){
   const host = document.getElementById('show');
   host.innerHTML = '';
-  for (const b of state.show || []){
+  const items = (state.show || []).filter(b => activeTab === 'All' || (b.group || '') === activeTab);
+  for (const b of items){
     const d = document.createElement('div');
     d.className = 'card show';
     d.innerHTML = (b.caption ? '<div class="cap">' + esc(b.caption) +
                    (b.for ? ' (' + esc(String(b.for).toUpperCase()) + ')' : '') + '</div>' : '') +
-                  mdToHtml(b.body_md);
+                  '<div class="mdwrap">' + mdToHtml(b.body_md) + '</div>';
     host.appendChild(d);
     typeset(d);
   }
-  document.getElementById('showSec').style.display = (state.show || []).length ? '' : 'none';
+  document.getElementById('showSec').style.display = items.length ? '' : 'none';
 }
 
+const STATE_LABEL = {working: 'working', waiting: 'waiting on you', done: 'done', error: 'error'};
+
 function renderSessions(){
-  const rows = state.sessions || [];
+  const rows = (state.sessions || []).filter(r => activeTab === 'All' || (r.group || '') === activeTab);
   document.getElementById('sessionsSec').style.display = rows.length ? '' : 'none';
   document.getElementById('sessions').innerHTML = rows.map(r =>
-    '<tr><td>' + esc(r.pane) + '</td><td>' + esc(r.doing) + '</td><td>' + esc(r.model) +
-    '</td><td><span class="pill ' + esc(r.state || 'working') + '">' + esc(r.state) + '</span>' +
-    (r.note ? ' <span class="small">' + esc(r.note) + '</span>' : '') + '</td></tr>').join('');
+    '<tr><td>' + esc(r.pane) + (r.group ? ' <span class="groupTag">' + esc(r.group) + '</span>' : '') +
+    '</td><td>' + esc(r.doing) + '</td><td>' + esc(r.model) +
+    '</td><td><span class="pill ' + esc(r.state || 'working') + '">' +
+    esc(STATE_LABEL[r.state] || r.state) + '</span>' +
+    (r.note ? ' <span class="small">' + esc(r.note) + '</span>' : '') + '</td>' +
+    '<td class="small">' + (r.updated ? esc(r.updated.replace('T', ' ').slice(5, 16)) : '') +
+    '</td></tr>').join('');
+}
+
+function renderUpdates(){
+  const rows = (state.updates || []).filter(u => activeTab === 'All' || (u.group || '') === activeTab);
+  document.getElementById('updatesSec').style.display = rows.length ? '' : 'none';
+  document.getElementById('updates').innerHTML = rows.map(u =>
+    '<li><span class="small">' + esc(String(u.ts || '').replace('T', ' ').slice(5, 16)) + '</span> ' +
+    '<b>' + esc(u.kind || '') + '</b> ' + esc(u.pane || '') +
+    (u.text ? ' - ' + esc(u.text) : '') + '</li>').join('');
 }
 
 function renderDone(){
-  const d = state.done || [];
+  const d = (state.done || []).filter(x => activeTab === 'All' || (x.group || '') === activeTab);
   document.getElementById('doneSec').style.display = d.length ? '' : 'none';
   document.getElementById('done').innerHTML = d.map(x => '<li>' + esc(x.text) + '</li>').join('');
 }
@@ -611,7 +780,7 @@ function renderAll(){
   document.getElementById('meta').innerHTML =
     esc(h.usage) + (h.note ? '<br>' + esc(h.note) : '') +
     '<br><span class="small">updated ' + esc(String(state.updated).replace('T', ' ').slice(0, 19)) + '</span>';
-  renderQuestions(); renderShow(); renderSessions(); renderDone();
+  renderQuestions(); renderTabs(); renderShow(); renderSessions(); renderUpdates(); renderDone();
 }
 
 // state.json is the source of truth on disk; state.js is the same object as a one-line script and
@@ -680,11 +849,16 @@ equations, and the answer forms.</div>
 <h2>Needs you (<span id="qcount">0</span>)</h2>
 <div id="questions"></div>
 
+<div id="tabs" class="tabbar"></div>
+
 <div id="showSec"><h2>Show</h2><div id="show"></div></div>
 
 <div id="sessionsSec"><h2>Sessions</h2><div class="card"><table>
-<thead><tr><th>Pane</th><th>Doing</th><th>Model</th><th>State</th></tr></thead>
+<thead><tr><th>Pane</th><th>Doing</th><th>Model</th><th>State</th><th>Updated</th></tr></thead>
 <tbody id="sessions"></tbody></table></div></div>
+
+<div id="updatesSec"><h2>Updates</h2>
+<div class="card"><ul class="doneList" id="updates"></ul></div></div>
 
 <div id="doneSec"><h2>Done since your last look</h2>
 <div class="card"><ul class="doneList" id="done"></ul></div></div>
@@ -729,6 +903,7 @@ def main(argv=None):
     aq.add_argument("--pick")
     aq.add_argument("--why")
     aq.add_argument("--from", dest="from_")
+    aq.add_argument("--group", help="tab this lands on; default: looked up from --from's herdr tab")
     aq.set_defaults(fn=cmd_add_question)
 
     an = sub.add_parser("answer")
@@ -741,6 +916,7 @@ def main(argv=None):
     sh.add_argument("--file")
     sh.add_argument("--text")
     sh.add_argument("--for", dest="for_")
+    sh.add_argument("--group", help="tab this lands on; default: the --for question's group")
     sh.set_defaults(fn=cmd_show)
 
     se = sub.add_parser("session")
@@ -757,6 +933,7 @@ def main(argv=None):
 
     dn = sub.add_parser("done")
     dn.add_argument("text")
+    dn.add_argument("--group", help="tab this lands on; default: none (All only)")
     dn.set_defaults(fn=cmd_done)
 
     pr = sub.add_parser("prune")

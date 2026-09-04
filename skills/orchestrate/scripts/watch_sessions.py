@@ -72,10 +72,21 @@ def to_board(kind, name, said):
             if any(b.get("caption") == cap
                    and " ".join(b.get("body_md", "").split())[:80] == key for b in s["show"]):
                 return
-            sid_ = B.add_show(cap, said)
+            sid_ = B.add_show(cap, said, group=B.group_for_who(name))
             print(f"  -> board {sid_}", flush=True)
     except Exception as e:
         print(f"  -> board write failed ({type(e).__name__}: {e})", flush=True)
+
+
+def board_update(name, kind, text):
+    """One line into Podium's live Updates feed - every stop-reason and report, not only the ones
+    that also become a question. Never lets a board write kill the watcher."""
+    try:
+        B.sync_board(new_updates=[{"ts": B.now_iso(), "pane": name, "kind": kind,
+                                    "text": " ".join(text.split())[:200],
+                                    "group": B.group_for_who(name)}])
+    except Exception as e:
+        print(f"  -> board update failed ({type(e).__name__}: {e})", flush=True)
 
 
 POLL = 8
@@ -130,9 +141,10 @@ while True:
                         print(f"GONE session {name} (exited)", flush=True)
                     ready_since.pop(sid, None)
                     last_said.pop(sid, None)
-        else:
+        if first:
             announced.update(sid for sid in cur if sid in by_sid)
 
+        if not first:
             # stop-reason lines: (a) registry idle/waiting, (b) pane agent_status idle/done,
             # (c) held for READY_HOLD seconds straight, (d) text differs from what was last emitted
             for sid, (st, name) in cur.items():
@@ -149,8 +161,13 @@ while True:
                 if last_said.get(sid) == said:
                     continue
                 print(f"{name} {kind} | {said}", flush=True)
-                if kind in ("QUESTION", "BLOCKED", "ERROR"):
-                    to_board(kind, name, said)
+                # a routine status update ("nothing to do", "holding for go") classifies QUESTION
+                # on the wide ls-facing word list; only a real question mark or an unambiguous ask
+                # for a decision is worth interrupting a human for
+                board_kind = None if kind == "QUESTION" and not L.looks_like_a_real_question(said) else kind
+                if board_kind in ("QUESTION", "BLOCKED", "ERROR"):
+                    to_board(board_kind, name, said)
+                board_update(name, kind, said)
                 last_said[sid] = said
                 said_stale.discard(sid)
                 said_prompt.discard(sid)
@@ -224,6 +241,7 @@ while True:
                 rep = side.get(pane_id, {}).get("report")
                 if rep and pane_id not in said_report and os.path.exists(rep):
                     print(f"{name} REPORT | {rep} ({os.path.getsize(rep)} bytes)", flush=True)
+                    board_update(name, "REPORT", f"report written: {rep}")
                     said_report.add(pane_id)
                 if ast not in ("idle", "done"):
                     agent_ready.pop(pane_id, None)
@@ -236,8 +254,10 @@ while True:
                 if not said or agent_said.get(pane_id) == said:
                     continue
                 print(f"{name} {kind} | {said}", flush=True)
-                if kind in ("QUESTION", "BLOCKED", "ERROR"):
-                    to_board(kind, name, said)
+                board_kind = None if kind == "QUESTION" and not L.looks_like_a_real_question(said) else kind
+                if board_kind in ("QUESTION", "BLOCKED", "ERROR"):
+                    to_board(board_kind, name, said)
+                board_update(name, kind, said)
                 agent_said[pane_id] = said
             prev_agents = cur_agents
 
@@ -246,6 +266,13 @@ while True:
                 if n:
                     print(f"REAP: {n} candidates", flush=True)
                 last_reap = now
+
+            # Podium's Sessions table, kept live off the same 8 s poll instead of waiting for
+            # someone to run `board sessions --from-ls` by hand.
+            try:
+                B.sync_board(session_rows=B.live_sessions())
+            except Exception as e:
+                print(f"  -> board session sync failed ({type(e).__name__}: {e})", flush=True)
 
         prev = cur
         first = False

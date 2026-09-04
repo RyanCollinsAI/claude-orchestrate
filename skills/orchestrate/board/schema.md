@@ -36,11 +36,28 @@ One thing your human has to answer. Everything else on the board is read-only.
 | `pick` | `"A"` | the recommended option; that radio comes pre-checked and outlined |
 | `pick_why` | string | one line under the options saying why |
 | `inputs[]` | `{"name": "a", "label": "a =", "width": 70}` | small text boxes instead of radios |
+| `group` | string | which tab this lands on; `""` shows only in **All**. See "Tabs" below. |
 | `created` | ISO | |
 | `answered` | ISO or `null` | non-null hides it from "Needs you" |
 | `answer` | string or `null` | what they said |
 
 Options and inputs are exclusive in practice: options make radios, inputs make text boxes, neither makes one textarea.
+
+### Tabs (set 2026-09-04)
+
+Every item in `questions[]`, `show[]`, `sessions[]` and `done[]` carries a `group`: the herdr tab
+label the item's session lives in, the same string `--group` filed the pane under at spawn time
+(`web-app`, `ideas-pipeline`, `video-pipeline`, `routines`, `orchestrator`, ...). The board builds an **All**
+tab plus one tab per distinct `group` it finds, and filters **Show**, **Sessions** and **Done** by
+whichever tab is selected. `""` (no live pane resolved, or none given) only ever shows under **All**.
+
+**Needs you never filters by tab.** Every open question shows there regardless of the selected tab,
+each carrying its own group as a small badge, so a question can never hide in a tab nobody opened.
+
+`add-question`, `show` and `done` take an explicit `--group`; when it is left off, `board.py` looks
+up the pane named by `--from` (or the session `show --for`'s question belongs to) through herdr and
+uses its tab, falling back to `""`. `sessions --from-ls` and `session <pane>` always derive `group`
+from the live pane, since a session row has one by definition.
 
 ### The context rule (set 2026-09-03)
 
@@ -64,6 +81,7 @@ Something to look at, no answer wanted.
 | `caption` | the line above the block: why he is looking at this |
 | `body_md` | same markdown rules as `context_md` |
 | `for` | question id this supports, or `""` |
+| `group` | which tab this lands on; default is the `for` question's group. See "Tabs" above. |
 | `created` | ISO |
 
 Newest first.
@@ -79,11 +97,25 @@ The table of what every other pane is doing. `board sessions --from-ls` rebuilds
 | `model` | short model name from the log |
 | `state` | `working` \| `waiting` \| `done` \| `error` - drives the pill colour |
 | `note` | context size, `<-- ROTATE` at 400k |
+| `group` | the pane's herdr tab. See "Tabs" above. |
 
 `state` comes from `orchlib.classify()`: `QUESTION`/`OFFER` -> `waiting`, `ERROR` -> `error`, `DONE` -> `done`, and a registry status of `busy` always wins as `working`.
 
+## `updates[]` (set 2026-09-04)
+
+`{"ts": ISO, "pane": "...", "kind": "DONE"|"QUESTION"|"BLOCKED"|"ERROR"|"REPORT", "text": "...", "group": "..."}`,
+newest first, capped at 50. The live event feed - `watch_sessions.py` writes one entry per stop-reason
+line and report-file landing through `board.sync_board(new_updates=[...])`, so it shows up on the board
+without anyone running a `board` command by hand. Not for human-curated milestones; that's `done[]`.
+
+## `next_qid`
+
+Integer, next question id to hand out. Monotonic - `next_qid()` only ever increases it, even past an
+id `prune` later removes from `questions[]`, so two different questions can never carry the same
+small number within one board's lifetime.
+
 ## `done[]`
 
-`{"ts": ISO, "text": "..."}`, newest first.
-`board answer` appends one automatically.
+`{"ts": ISO, "text": "...", "group": "..."}`, newest first.
+`board answer` appends one automatically, inheriting the answered question's `group`.
 `board prune --days 1` drops lines and answered questions older than that.

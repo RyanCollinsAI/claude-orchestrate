@@ -2,13 +2,14 @@
   "updated": "2026-01-01T09:00:00-08:00",
   "header": {
     "usage": "5h window 38% used - 7d window 55% used",
-    "note": "4 sessions alive, 1 waiting on you"
+    "note": "5 sessions alive, 2 waiting on you"
   },
   "questions": [
     {
       "id": "q1",
       "title": "Retry policy for the importer: give up, or back off?",
       "from": "importer",
+      "group": "web-app",
       "context_md": "The importer retries a failed row immediately, three times, then drops it. On last night's run 412 rows failed the same way: the upstream API rate-limited us and every retry landed inside the same window.\n\n```python\nfor attempt in range(3):\n    r = client.post(url, json=row)\n    if r.ok:\n        break\n    # no sleep - all three attempts land in the same rate-limit window\n```\n\n| Option | Rows recovered last night | Wall clock |\n|---|---|---|\n| A: exponential backoff, 5 tries | 412 of 412 | +9 min |\n| B: drop and report | 0 of 412 | unchanged |\n\nBoth are one commit. A changes how long a nightly run takes; B changes what lands in the table.",
       "options": [
         {"value": "A", "label": "Exponential backoff, 5 tries"},
@@ -20,33 +21,72 @@
       "created": "2026-01-01T08:41:00-08:00",
       "answered": null,
       "answer": null
+    },
+    {
+      "id": "q2",
+      "title": "FH weekly idea digest: post it at 9am or 7am?",
+      "from": "ideas-digest",
+      "group": "ideas-pipeline",
+      "context_md": "The idea digest currently fires at 9am, after the morning scrape finishes at 8:40. Moving it to 7am means it ships before the scrape, on yesterday's data.\n\n| Option | Freshness | Ships before you're up? |\n|---|---|---|\n| A: keep 9am | same-morning scrape | no, right as you sit down |\n| B: move to 7am | previous day's scrape | yes |\n\nNo code risk either way - it's a single cron line.",
+      "options": [
+        {"value": "A", "label": "Keep 9am, same-morning data"},
+        {"value": "B", "label": "Move to 7am, yesterday's data"}
+      ],
+      "pick": "A",
+      "pick_why": "fresher data beats an hour of lead time",
+      "inputs": [],
+      "created": "2026-01-01T08:20:00-08:00",
+      "answered": null,
+      "answer": null
     }
   ],
   "show": [
     {
       "id": "s1",
       "caption": "Nightly import, last seven runs",
+      "group": "web-app",
       "body_md": "| Night | Rows in | Failed | Minutes |\n|---|---|---|---|\n| Mon | 48,210 | 0 | 22 |\n| Tue | 47,988 | 0 | 21 |\n| Wed | 48,401 | 412 | 21 |\n\nWednesday is the run in Q1. Nothing else changed that night.",
       "for": "q1",
       "created": "2026-01-01T08:41:00-08:00"
+    },
+    {
+      "id": "s2",
+      "caption": "FH idea backlog, last three runs",
+      "group": "ideas-pipeline",
+      "body_md": "| Run | New ideas | Used | Backlog |\n|---|---|---|---|\n| Fri | 34 | 6 | 91 |\n| Sat | 29 | 4 | 116 |\n| Sun | 31 | 5 | 142 |\n\nBacklog is growing about 25/day faster than it's used.",
+      "for": "q2",
+      "created": "2026-01-01T08:15:00-08:00"
     }
   ],
   "sessions": [
     {"pane": "importer", "doing": "retry policy, waiting on Q1", "model": "sonnet",
-     "state": "waiting", "note": "ctx 88k"},
+     "state": "waiting", "note": "ctx 88k", "group": "web-app", "updated": "2026-01-01T08:41:00-08:00"},
     {"pane": "api-tests", "doing": "flaky auth test, bisecting", "model": "opus",
-     "state": "working", "note": "ctx 214k"},
+     "state": "working", "note": "ctx 214k", "group": "web-app", "updated": "2026-01-01T08:58:00-08:00"},
     {"pane": "docs", "doing": "README rewrite", "model": "haiku",
-     "state": "working", "note": "ctx 31k"},
+     "state": "working", "note": "ctx 31k", "group": "", "updated": "2026-01-01T08:50:00-08:00"},
+    {"pane": "ideas-planner", "doing": "drafting next week's idea slate", "model": "sonnet",
+     "state": "working", "note": "ctx 52k", "group": "ideas-pipeline", "updated": "2026-01-01T08:57:00-08:00"},
     {"pane": "migration", "doing": "schema v4 backfill", "model": "sonnet",
-     "state": "done", "note": "ctx 402k  <-- ROTATE"}
+     "state": "done", "note": "ctx 402k  <-- ROTATE", "group": "routines", "updated": "2026-01-01T08:30:00-08:00"}
   ],
+  "updates": [
+    {"ts": "2026-01-01T08:58:00-08:00", "pane": "api-tests", "kind": "DONE",
+     "text": "Bisected the flaky auth test to clock skew in the test container. Fix pushed.", "group": "web-app"},
+    {"ts": "2026-01-01T08:41:00-08:00", "pane": "importer", "kind": "QUESTION",
+     "text": "Retry policy for the importer: give up, or back off?", "group": "web-app"},
+    {"ts": "2026-01-01T08:35:00-08:00", "pane": "migration", "kind": "REPORT",
+     "text": "report written: handoffs/report-migration-2026-01-01-0830.md", "group": "routines"},
+    {"ts": "2026-01-01T08:30:00-08:00", "pane": "migration", "kind": "DONE",
+     "text": "Schema v4 backfill finished: 1.2M rows, zero orphans, verified against the v3 snapshot.", "group": "routines"}
+  ],
+  "next_qid": 3,
   "done": [
-    {"ts": "2026-01-01T08:30:00-08:00",
+    {"ts": "2026-01-01T08:30:00-08:00", "group": "routines",
      "text": "Schema v4 backfill finished: 1.2M rows, zero orphans, verified against the v3 snapshot."},
-    {"ts": "2026-01-01T07:55:00-08:00",
+    {"ts": "2026-01-01T07:55:00-08:00", "group": "web-app",
      "text": "Flaky auth test bisected to the clock skew in the test container. Fix pushed."},
-    {"ts": "2026-01-01T07:10:00-08:00",
+    {"ts": "2026-01-01T07:10:00-08:00", "group": "web-app",
      "text": "Q0 answered: keep the staging database on the smaller instance until March."}
   ]
 }

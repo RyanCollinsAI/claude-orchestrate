@@ -82,6 +82,21 @@ ERROR_MARKS = ("traceback", "error", "failed", "exception", "could not")
 BLOCKED_MARKS = ("blocked by the auto mode classifier", "auto mode classifier",
                  "classifier blocked", "requires approval to run")
 
+# classify_words()'s QUESTION_MARKS deliberately leans wide - "waiting on"/"waiting for"/"let me
+# know" catch a real question buried mid-message, and that's fine for `ls`'s one-line stop-reason
+# where a false positive costs nothing. Auto-posting to the board is not that cheap: three
+# non-questions ("I am holding for go", "nothing to do") landed on it in one hour (2026-09-04)
+# because a builder's routine status update happened to contain one of those phrases. Narrower on
+# purpose - a literal question mark, or an unambiguous ask for a decision - for that one call site.
+DECISION_MARKS = ("do you want", "which one", "which of", "your call", "should i ",
+                  "confirm before", "pick one", "need you to", "if you'd rather")
+
+
+def looks_like_a_real_question(text):
+    """True only for a genuine question worth interrupting a human for - used solely to gate an
+    auto-post to the board, never `classify()`/`classify_words()` itself."""
+    return "?" in text or any(k in text.lower()[-600:] for k in DECISION_MARKS)
+
 
 # ---------------------------------------------------------------- herdr
 
@@ -232,9 +247,8 @@ _CWD_CACHE = {}
 
 def log_path(sid):
     """The session's .jsonl. Claude Code files logs under a per-cwd folder, so a session spawned
-    with --cwd elsewhere (a fleet of builders working in a different repo) is NOT under LOGS - read
-    its cwd from the registry. Before this, `ls` showed ctx=0k and no model for every cross-cwd
-    pane (2026-09-03).
+    with --cwd elsewhere (the CourseGrid builders) is NOT under LOGS - read its cwd from the
+    registry. Before this, `ls` showed ctx=0k and no model for every cross-cwd pane (2026-09-03).
 
     A registry row with no `cwd` (or one whose log isn't where that cwd predicts, e.g. an older
     Claude Code that wrote the field differently) falls through to `find_log`'s glob search across
