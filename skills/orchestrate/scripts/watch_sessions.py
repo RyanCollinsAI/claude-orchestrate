@@ -28,12 +28,24 @@ Every print flushes or Monitor never sees it. Poll is 8 s; panes are read every 
 `herdr pane read` costs a subprocess per pane (`herdr pane list`, used for agent_status, is one call
 for all panes and is cheap enough to run every poll).
 """
-import os, sys, time
+import os, re, sys, time
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import orchlib as L
 import board as B
 from orch import reap_candidates
+
+
+def short_title(said, fallback):
+    """First plain-text line of `said`, trimmed - Podium now shows only the title by default
+    (2026-09-04, the question card puts everything else behind a Details toggle), so a static
+    "X is waiting on an answer" says nothing until the orchestrator edits it in. This gives the
+    card a real short title from the start."""
+    line = next((l.strip() for l in said.splitlines() if l.strip()), "")
+    line = re.sub(r"[`*_#>]+", "", line).strip()
+    if not line:
+        return fallback
+    return line[:77] + "..." if len(line) > 80 else line
 
 
 def to_board(kind, name, said):
@@ -62,9 +74,9 @@ def to_board(kind, name, said):
                     f"\n\n**Run this yourself with the `!` prefix:**\n\n```\n{cmd}\n```"
                     if cmd else
                     "\n\n(No single command found in its message - read it and paste the right one.)")
-                title = f"{name} is blocked by the permission classifier"
+                title = short_title(said, f"{name} is blocked by the permission classifier")
             else:
-                ctx, title = said, f"{name} is waiting on an answer"
+                ctx, title = said, short_title(said, f"{name} is waiting on an answer")
             qid = B.add_question_dict({"title": title, "from": name, "context_md": ctx})
             print(f"  -> board {qid}", flush=True)
         else:

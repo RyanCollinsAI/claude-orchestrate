@@ -199,10 +199,15 @@ Podium opens in the Lavish editor (`lavish-axi`) and has four sections: **Needs 
 `board/state.json` is the source of truth; `board/board.html` is generated and Podium re-reads the
 state every 5 s, so a change lands without reopening.
 
-**A question carries the real thing, never a summary of it.** Their words: *"This needs to be like
-give the full context of the question here."* Put the actual code block, the actual picture, the
-actual table or diagram in `--context-file`. `context_md` renders mermaid fences, `$$math$$`,
-images and GFM tables. A single `$` is deliberately not a math delimiter - money comes up too often.
+**Short by default; the real thing is one click away.** Their words (2026-09-04): *"it's a lot of
+text you have on there about the decisions I need to make. Can you make it more simple and less
+text and easier for me to understand."* A question card shows, by default, only the title, one
+plain line per option phrased as *"if you pick this, X happens"*, the recommended pick plus its
+one-line why, and the buttons. Put the actual code block, the actual picture, the actual table or
+diagram in `--context-file` as before - never a summary of it - but it now renders under a
+collapsed **Details** toggle, closed by default. `context_md` still renders mermaid fences,
+`$$math$$`, images and GFM tables. A single `$` is deliberately not a math delimiter - money comes
+up too often.
 
     py "$BOARD" add-question --id q5 --title "..." --context-file x.md \
         --option A="..." --option B="..." --pick A --why "..." --from cg4-askbox
@@ -220,7 +225,7 @@ small reversible picks is the failure mode, not the goal.
 
 **Podium has tabs, one per project group.** A `group` field on every question, show block, session
 row and done line sorts it onto the tab named after the herdr tab it came from - the same string
-`--group` files a pane under at spawn time (`web-app`, `ideas-pipeline`, ...). `add-question`, `show`
+`--group` files a pane under at spawn time (`coursegrid`, `fh-ideas`, ...). `add-question`, `show`
 and `done` also take an explicit `--group` for items with no session behind them; leave it off and
 board.py looks the pane up itself, falling back to `""` (All only) when nothing live matches. The
 **Needs you** strip is pinned above the tabs and always lists every open question regardless of
@@ -238,12 +243,13 @@ Watch their answers the same way you watch sessions:
     LAYOUT n warnings                             fix the overflow before involving them
     SESSION ended                                 they closed the Lavish session
 
-`watch_sessions.py` also posts by itself: a builder's `QUESTION` becomes a board question with the
-builder's own last message as context and no options; a `BLOCKED` becomes a board question whose
-context is that message **plus the exact one-line command to paste with the `!` prefix**, pulled out
-of the builder's own fenced block; an `ERROR` becomes a Show block captioned `<name> hit an error`.
-All dedup on pane + the first 80 characters. Read the question, then edit the options and the pick
-in before your human sees it.
+`watch_sessions.py` also posts by itself: a builder's `QUESTION` becomes a board question titled
+with the first plain-text line of its own message (short, so the collapsed card says something
+before you touch it), the full message under Details, and no options; a `BLOCKED` becomes a board
+question whose Details is that message **plus the exact one-line command to paste with the `!`
+prefix**, pulled out of the builder's own fenced block; an `ERROR` becomes a Show block captioned
+`<name> hit an error`. All dedup on pane + the first 80 characters. Read the question, then edit
+the options and the pick in before your human sees it.
 
 Traps, both measured 2026-09-03:
 

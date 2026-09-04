@@ -7,12 +7,12 @@ without reopening. Every command below renders at the end, so the HTML is never 
 
   py board.py add-question --id q5 --title "..." --context-file x.md
         [--context "..."] [--option A="..." --option B="..."] [--pick A --why "..."]
-        [--input a="a =" --input b="b ="] [--from cg4-askbox] [--group web-app]
+        [--input a="a =" --input b="b ="] [--from cg4-askbox] [--group coursegrid]
   py board.py answer q5 "A"                     mark answered, move it to Done
-  py board.py show --caption "..." (--file x.md | --text "...") [--for q5] [--group web-app]
+  py board.py show --caption "..." (--file x.md | --text "...") [--for q5] [--group coursegrid]
   py board.py session <pane> --doing "..." --model opus --state working
   py board.py sessions --from-ls                fill the table from the live herdr/registry board
-  py board.py done "text" [--group web-app]  one line under "Done since your last look"
+  py board.py done "text" [--group coursegrid]  one line under "Done since your last look"
   py board.py render                            rewrite board.html from state.json
   py board.py open                              lavish-axi board.html, print the URL
   py board.py prune [--days 1]                  drop old Done lines
@@ -184,7 +184,7 @@ def kv(pairs, what):
 
 def group_for_who(who):
     """The herdr tab label a pane or session display name lives in right now - the same string
-    --group filed it under at spawn time. An overflow tab ('web-app-2', from orch.py's
+    --group filed it under at spawn time. An overflow tab ('coursegrid-2', from orch.py's
     cap-3-panes-per-tab rule) folds back to its base group. '' when nothing live matches: the
     session already ended, or this is the orchestrator's own write with no session behind it.
     Board.py's callers pass this through --group when they already know it, so a live lookup is
@@ -530,8 +530,7 @@ CSS = """
   *{box-sizing:border-box;min-width:0}
   body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
   .wrap{max-width:1480px;margin:0 auto;padding:20px 28px 80px}
-  header{display:flex;justify-content:space-between;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:18px}
-  header h1{font-size:20px;margin:0}
+  header{display:flex;justify-content:flex-end;align-items:baseline;gap:12px;flex-wrap:wrap;margin-bottom:18px}
   header .meta{color:var(--mute);font-size:13px;text-align:right}
   h2{font-size:13px;letter-spacing:.08em;text-transform:uppercase;color:var(--mute);margin:26px 0 10px}
   .card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:10px;overflow-wrap:anywhere}
@@ -542,6 +541,11 @@ CSS = """
   .groupTag{display:inline-block;font-size:11px;color:var(--mute);border:1px solid var(--line);border-radius:999px;padding:0 8px;margin-left:6px}
   .ctx{color:var(--mute);font-size:14px;margin:4px 0 8px}
   .ctx p{margin:6px 0}
+  .ctxDetails{margin:6px 0}
+  .ctxDetails summary{cursor:pointer;font-size:13px;color:var(--ask);font-weight:600;list-style:none}
+  .ctxDetails summary::-webkit-details-marker{display:none}
+  .ctxDetails summary::before{content:"▸ "}
+  .ctxDetails[open] summary::before{content:"▾ "}
   .mdwrap{overflow-x:auto}
   .tabbar{display:flex;gap:6px;flex-wrap:wrap;margin:14px 0 20px}
   .tab{font:inherit;border:1px solid var(--line);background:#fff;color:var(--ink);border-radius:999px;padding:5px 14px;font-size:13px;cursor:pointer}
@@ -549,8 +553,8 @@ CSS = """
   .tab .badge{display:inline-block;margin-left:6px;font-size:11px;padding:0 6px;border-radius:999px;background:var(--askbg);color:var(--ask)}
   .tab.active .badge{background:rgba(255,255,255,.28);color:#fff}
   .ctx code,.small code{background:#f1efe9;border-radius:4px;padding:1px 4px;font:13px ui-monospace,Consolas,monospace}
-  .opts{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}
-  .opts label{display:flex;gap:6px;align-items:center;border:1px solid var(--line);background:#fff;border-radius:8px;padding:6px 10px;cursor:pointer}
+  .opts{display:flex;flex-direction:column;gap:6px;margin:8px 0}
+  .opts label{display:flex;gap:8px;align-items:flex-start;border:1px solid var(--line);background:#fff;border-radius:8px;padding:6px 10px;cursor:pointer}
   .opts label.pick{border-color:var(--ask)}
   .pickTag{font-size:11px;color:var(--ask);font-weight:600;margin-left:4px}
   .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
@@ -692,7 +696,8 @@ function questionCard(q){
           '<span class="title">' + esc(q.title) + '</span>' +
           (q.from ? ' <span class="from">from ' + esc(q.from) + '</span>' : '') +
           (q.group ? ' <span class="groupTag">' + esc(q.group) + '</span>' : '') + '</div>';
-  if (q.context_md) h += '<div class="ctx"><div class="mdwrap">' + mdToHtml(q.context_md) + '</div></div>';
+  if (q.context_md) h += '<details class="ctxDetails"><summary>Details</summary>' +
+      '<div class="ctx"><div class="mdwrap">' + mdToHtml(q.context_md) + '</div></div></details>';
   if (q.options && q.options.length){
     h += '<div class="opts">';
     for (const o of q.options){
@@ -848,7 +853,6 @@ def write_html():
 <div class="wrap">
 
 <header>
-  <h1>Podium</h1>
   <div class="meta" id="meta"></div>
 </header>
 
