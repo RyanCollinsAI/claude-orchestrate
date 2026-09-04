@@ -145,10 +145,13 @@ Raw spawn, when the prompt really is one line or a handoff file:
   human on small reversible calls, so it acts on your answers instead of parking on them.
 
 **Anything that has to outlive one turn is a pane, not a subagent.** The Agent tool is for a search
-that finishes inside minutes and hands back an answer. A tutor, a long build, a watcher, anything
-you will come back to - `orch.py spawn` it. In-process subagents are children of this session's
+that finishes inside a couple of minutes and hands back one answer - a docs lookup, a transcript, a
+grep across repos. A tutor, a long build, a watcher, anything you will come back to or your human
+might want to watch - `orch.py spawn` it. In-process subagents are children of this session's
 process and every one of them died with each of 2026-09-03's four restarts; a pane survives, and
-`resume` finds it again.
+`resume` finds it again. Confirmed 2026-09-04 when the human was asked whether
+quick lookups should be panes too: no, panes for anything over a couple of minutes, subagents for
+quick lookups. Say which you used when it matters.
 
 ## 4b. The Board - the one page they read
 
