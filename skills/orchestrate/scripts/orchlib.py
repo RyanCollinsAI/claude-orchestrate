@@ -63,7 +63,7 @@ ROTATE_AT = int(cfg("rotate_at_k", 400))       # k tokens
 
 MODELS = {
     "fable": "claude-fable-5-1",
-    "opus": "claude-opus-5",
+    "opus": "claude-opus-5-5",
     "sonnet": "claude-sonnet-5",
     "haiku": "claude-haiku-4-5-20251001",
 }
