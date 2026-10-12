@@ -19,8 +19,9 @@
   "_cdp_url": "optional DevTools URL of the one shared Chrome that sessions drive (the browser lock guards it). `doctor` probes <cdp_url>/json/version when set. Default: empty, no probe.",
   "cdp_url": "",
 
-  "_rotate_at_k": "context size in thousands of tokens at which a session is marked for rotation. Default: 400.",
-  "rotate_at_k": 400,
+
+  "_codex_model": "model id every `--kind codex` pane starts on, passed as `codex -m <id>`. The ids this machine can use are the `slug` values in ~/.codex/models_cache.json. Default: gpt-6-astra (GPT-6-Astra, the newest).",
+  "codex_model": "gpt-6-astra",
 
   "_projects_dir": "where Claude Code keeps session logs. Default: ~/.claude/projects.",
   "_sessions_dir": "the live session registry. Default: ~/.claude/sessions.",
@@ -28,5 +29,22 @@
   "_board_dir": "where Podium's state and generated page live. Default: <skill>/board.",
 
   "_digest_repos": "repos `board.py digest` reads this morning's commits from. Default: none.",
-  "digest_repos": []
+  "digest_repos": [],
+
+  "_podium_slack_channel": "channel every `board.py done` and `board.py show` also posts one line to, so the page can keep them behind a tab. Empty (the default) turns the Slack mirror off; PODIUM_SLACK=0 turns it off for one run.",
+  "podium_slack_channel": "",
+
+  "_slack_lib": "directory holding the shared `slack.py` those posts go through (routines/sessionlib here). Empty = no Slack mirror, whatever the channel says.",
+  "slack_lib": "",
+
+  "_group_colors": "prompt-bar colour (`/color`) per herdr group, set by `orch.py spawn` before the first prompt and by `orch.py color --all`. Keys are group names, values one of red, blue, green, yellow, purple, orange, pink, cyan, default; the empty key is the no-group fallback. Defaults: orchestrator red, channela purple, webapp blue, school green, orch yellow, other cyan.",
+  "group_colors": {"channela": "purple", "webapp": "blue", "school": "green", "orch": "yellow", "": "cyan"},
+  "_autopick_enabled": "let `board.py autopick` apply the recommended pick on a question the asker marked --auto and nobody answered inside 24h. Default false: with it off, autopick refuses and says so, and --dry-run still prints what would have fired.",
+  "autopick_enabled": false,
+
+  "_space_order": "the herdr sidebar order `orch.py space --order` sorts toward. The first entry is the seat's own space and is never moved - only later entries get relocated, and only the ones out of place. A `Slack` entry with no live workspace yet gets one created (see `jobs_view.py`). Anything live but not named here keeps its current relative position. Default: empty, `space --order` no-ops and says so.",
+  "space_order": [],
+
+  "_auto_close_enabled": "let board_watch.py run `orch.py auto-close` for real every 30 min, closing a pane only when it was spawned by orch.py, is idle+DONE for 30+ min, has no open board question naming it, and its git worktree has nothing uncommitted or unpushed. Default false: with it off, `orch.py auto-close --dry-run` still prints what would close.",
+  "auto_close_enabled": false
 }

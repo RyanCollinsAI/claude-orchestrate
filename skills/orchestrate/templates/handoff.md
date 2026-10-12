@@ -1,7 +1,8 @@
 # Handoff: <one-line title of this work>
 
-Written by <session name> at <timestamp>. The session reading this is the replacement; it has none
-of the earlier context and must not ask the human to repeat anything written below.
+Written by <session name> at <timestamp>. The session reading this is being briefed on this work
+for the first time; it has none of the context behind it and must not ask the human to repeat
+anything written below.
 
 ## Goal (the human's words)
 
@@ -16,8 +17,8 @@ These outlive any single step, so they go before the progress sections. "(none)"
 ## Key decisions
 
 <Every settled call, one line each, with its reason AND the option that lost. A decision without
-its rejected alternative gets re-argued by the replacement, which is the most expensive thing a
-rotation can do. If the human made the call, say so and quote them.>
+its rejected alternative gets re-argued by the pane reading this. If the human made the call, say
+so and quote them.>
 
 - **<what was decided>**: because <why> - rejected <alternative> because <why not>
 
@@ -41,6 +42,13 @@ rotation can do. If the human made the call, say so and quote them.>
 
 <Only real blockers. Empty is a valid answer. Never park a small reversible call here - the
 orchestrator answers those.>
+
+## Waiting on the human
+
+<Each thing the human still has to do, one line each. Before you list one, check the live source
+this turn (Gmail Sent, the portal, Canvas plus gradeportal, `orch.py ls`) and drop it if it is done.
+Name the source and the time you checked it. Anything older than 24 hours that you could not
+re-check gets "(unverified)". Two sent emails stayed on this list after he sent them (2026-10).>
 
 ## Traps hit
 

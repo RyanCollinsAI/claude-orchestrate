@@ -1,0 +1,56 @@
+{
+  "_notes": [
+    "Example dispatch table. Copy it, then edit the rules to match your own subscriptions and habits.",
+    "`py orch.py dispatch` prints the rules. Every `orch.py task|spawn|review` must name the rule it matched with --rule <n>. The orchestrator reads `when` with judgment; the scripts never parse it.",
+    "A rule's `use` is a list. One entry means that model. Several entries mean: pick the harness with the most weekly quota left (`py orch.py quota`).",
+    "Optional top-level `runwayFloor` is a weekly percent. An entry whose harness is known to be under it is skipped while another entry is not. Optional `spendPriority` (a number, default 0) on an entry breaks ties before headroom does.",
+    "Say which rule you picked when you report.",
+    "The human's word for one specific task beats any rule here."
+  ],
+  "runwayFloor": 10,
+  "rules": [
+    {
+      "when": "Genuinely hard: architecture, a bug that survived its own fix, a race condition, or a decision that is expensive to reverse.",
+      "jev": "The task needs deep design or debugging judgment, not routine edits.",
+      "use": [
+        { "harness": "claude", "model": "opus", "effort": "xhigh" }
+      ],
+      "why": "Spend the strongest model where a wrong answer costs the most."
+    },
+    {
+      "when": "Hard but ordinary: a multi-file feature, or a refactor that needs judgment but not a research-grade answer.",
+      "jev": "The task is a normal feature or refactor spanning several files.",
+      "use": [
+        { "harness": "claude", "model": "sonnet", "effort": "high" }
+      ],
+      "why": "Sonnet at high effort handles most building work at a fraction of the cost of opus."
+    },
+    {
+      "when": "An adversarial review of a diff or PR before a merge.",
+      "jev": "The task is to review someone else's change and try to break it.",
+      "use": [
+        { "harness": "claude", "model": "sonnet", "effort": "high" }
+      ],
+      "why": "A reviewer should not be the model that wrote the change. If you have a second model family, put it first here."
+    },
+    {
+      "when": "Trivial and mechanical edits: a rename, doc cleanup, or applying a fix list someone else wrote.",
+      "jev": "The task is purely mechanical, with no design choices.",
+      "use": [
+        { "harness": "claude", "model": "haiku", "effort": "medium" }
+      ],
+      "why": "Low effort and a small model for well-defined work."
+    },
+    {
+      "when": "Read-only sweep or recipe work with a check behind it: classify, count, or list things across many files.",
+      "jev": "The task reads and reports; it changes nothing.",
+      "use": [
+        { "harness": "claude", "model": "haiku", "effort": "high" }
+      ],
+      "why": "Cheap model, and the check catches a wrong count."
+    }
+  ],
+  "default": [
+    { "harness": "claude", "model": "sonnet", "effort": "high" }
+  ]
+}

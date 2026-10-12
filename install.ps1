@@ -43,13 +43,14 @@ Write-Host ""
 
 # ---------------------------------------------------------------- 1. copy the skill
 New-Item -ItemType Directory -Force -Path $dest | Out-Null
-foreach ($sub in 'scripts', 'templates', 'board') {
+foreach ($sub in 'scripts', 'templates', 'board', 'references') {
   New-Item -ItemType Directory -Force -Path (Join-Path $dest $sub) | Out-Null
 }
 Copy-Item (Join-Path $repo 'skills\orchestrate\SKILL.md') $dest -Force
 Copy-Item (Join-Path $repo 'skills\orchestrate\scripts\*.py')   (Join-Path $dest 'scripts')   -Force
 Copy-Item (Join-Path $repo 'skills\orchestrate\templates\*.md') (Join-Path $dest 'templates') -Force
 Copy-Item (Join-Path $repo 'skills\orchestrate\board\*')        (Join-Path $dest 'board')     -Force
+Copy-Item (Join-Path $repo 'skills\orchestrate\references\*.md') (Join-Path $dest 'references') -Force
 Copy-Item (Join-Path $repo 'config.example.json') $dest -Force
 Write-Host "Skill copied."
 
