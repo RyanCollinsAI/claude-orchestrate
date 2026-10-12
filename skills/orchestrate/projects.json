@@ -1,0 +1,8 @@
+{
+  "_comment": "How each repo ships. mode: no-mistakes (full gate, then PR) | direct-PR (push + PR, no gate) | local-only (commit straight to main). yolo: true lets the agent merge green work itself; every repo starts false and you flip it per repo. path = the repo root (the main checkout, not a worktree). Read by scripts/project_mode.py. A repo not listed gets `default`.",
+  "default": {"mode": "local-only", "yolo": false},
+  "projects": [
+    {"name": "my-notes", "path": "~/Vault", "mode": "local-only", "yolo": false, "note": "personal notes ship straight to main"},
+    {"name": "my-webapp", "path": "~/dev/my-webapp", "mode": "direct-PR", "yolo": false, "note": "production, takes payments; never yolo"}
+  ]
+}

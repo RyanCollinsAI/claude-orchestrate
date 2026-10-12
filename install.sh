@@ -35,11 +35,12 @@ echo "  target $DEST"
 echo
 
 # ---------------------------------------------------------------- 1. copy the skill
-mkdir -p "$DEST/scripts" "$DEST/templates" "$DEST/board"
+mkdir -p "$DEST/scripts" "$DEST/templates" "$DEST/board" "$DEST/references"
 cp "$REPO/skills/orchestrate/SKILL.md"      "$DEST/"
 cp "$REPO"/skills/orchestrate/scripts/*.py  "$DEST/scripts/"
 cp "$REPO"/skills/orchestrate/templates/*.md "$DEST/templates/"
 cp "$REPO"/skills/orchestrate/board/*       "$DEST/board/"
+cp "$REPO"/skills/orchestrate/references/*.md "$DEST/references/"
 cp "$REPO/config.example.json"              "$DEST/"
 echo "Skill copied."
 

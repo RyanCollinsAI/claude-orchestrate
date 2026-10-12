@@ -47,7 +47,7 @@ Options and inputs are exclusive in practice: options make radios, inputs make t
 
 Every item in `questions[]`, `show[]`, `sessions[]` and `done[]` carries a `group`: the herdr tab
 label the item's session lives in, the same string `--group` filed the pane under at spawn time
-(`coursegrid`, `fh-ideas`, `skills-video`, `routines`, `orchestrator`, ...). Podium builds an **All**
+(`webapp`, `fh-ideas`, `skills-video`, `routines`, `orchestrator`, ...). Podium builds an **All**
 tab plus one tab per distinct `group` it finds, and filters **Show**, **Sessions** and **Done** by
 whichever tab is selected. `""` (no live pane resolved, or none given) only ever shows under **All**.
 

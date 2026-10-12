@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.3.0 - 2026-10-12
+
+Sync with the working copy: the orchestrator, the seat pair, and the dispatch rules.
+
+### Added
+
+- **Seat pair** (`seat_pair.py`, `seat_watch.py`, `references/seat-pair-*.md`). A second, cheaper session sits beside the orchestrator, answers small reversible questions for the human, and escalates the rest.
+- **Dispatch rules** (`dispatch_rule.py`, `references/dispatch.md`). A small table maps task type to model and effort, so the orchestrator reads a rule instead of deciding each time.
+- **Approvals and asks** (`approvals.py`, `asks.py`). A risky action needs a single-use approval id; a human choice becomes a two-option question on the board.
+- **Hooks** `hooks/seat-pair-log.py` and `hooks/seat-pair-route.py` feed the seat pair; wire them in `settings.json` as `references/seat-pair-seat.md` describes.
+- **Pane rules** (`references/pane-rules.md`). One file every spawned session reads once, so the first prompt stays short.
+- **Watchdog, reaper, quota, unstick, scorecard, remote, ACP panes**, plus tests for each.
+
+### Changed
+
+- `orch.py`, `orchlib.py`, `board.py`, `board_watch.py`, `watch_sessions.py`, `auto_accept.py` and the task and handoff templates are replaced with the current versions.
+- The installers also copy `references/`.
+
+### Removed
+
+- Personal paths, ids, accounts, and project names. Examples now use `YOURNAME`, `Vault`, and placeholder channel and project names.
+
 ## 0.2.0 - 2026-09-03
 
 First public release. Everything below was built and proven on one machine over one long day, then
